@@ -18,6 +18,11 @@ config/features=PackedStringArray("4.6")
 
 Net="*res://shared/scripts/net/Net.gd"
 World="*res://shared/scripts/world/World.gd"
+SpellCache="*res://shared/scripts/spells/SpellCache.gd"
+SpellLoader="*res://shared/scripts/spells/SpellLoader.gd"
+SpellRegistry="*res://shared/scripts/spells/SpellRegistry.gd"
+SpellNet="*res://shared/scripts/spells/SpellNet.gd"
+SpellCastController="*res://shared/scripts/spells/SpellCastController.gd"
 
 [physics]
 

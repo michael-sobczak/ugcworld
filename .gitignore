@@ -39,3 +39,6 @@ __pycache__/
 *.pyo
 .env
 venv/
+
+# UGC Backend generated data
+ugc_backend/data/

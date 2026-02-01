@@ -1,12 +1,18 @@
 extends Node
 
-## Client controller for terraforming demo.
+## Client controller for terraforming and spell casting demo.
 ## Connects to the Python backend server.
 ##
 ## Controls:
 ## - C or Enter: Connect to server
-## - 1: Cast create_land spell (add_sphere)
-## - 2: Cast dig spell (subtract_sphere)
+## - 1: Cast create_land spell (legacy voxel op)
+## - 2: Cast dig spell (legacy voxel op)
+## - 3: Cast demo_spark spell (new spell system)
+## - 4: Cast demo_spawn spell (new spell system)
+## - 5: Build a new demo_spark revision
+## - 6: Build a new demo_spawn revision
+## - 7: Publish demo_spark to beta
+## - 8: Publish demo_spawn to beta
 ## - WASD: Move camera
 ## - Right-click: Toggle mouse look
 ## - Shift: Move faster
@@ -29,16 +35,25 @@ extends Node
 var camera: Camera3D = null
 var net_node: Node = null
 var world_node: Node = null
+var spell_net: Node = null
+var spell_cast: Node = null
+var spell_registry: Node = null
 
 ## State
 var _mouse_captured: bool = false
 var _camera_rotation: Vector2 = Vector2.ZERO
+
+## Track latest built revisions for publishing
+var _latest_revisions: Dictionary = {}  # spell_id -> revision_id
 
 
 func _ready() -> void:
 	# Get autoload references
 	net_node = get_node_or_null("/root/Net")
 	world_node = get_node_or_null("/root/World")
+	spell_net = get_node_or_null("/root/SpellNet")
+	spell_cast = get_node_or_null("/root/SpellCastController")
+	spell_registry = get_node_or_null("/root/SpellRegistry")
 	
 	# Find camera in scene
 	camera = get_viewport().get_camera_3d()
@@ -57,6 +72,18 @@ func _ready() -> void:
 		world_node.sync_complete.connect(_on_sync_complete)
 		world_node.spell_rejected.connect(_on_spell_rejected)
 	
+	# Connect to spell system signals
+	if spell_net:
+		spell_net.job_progress.connect(_on_job_progress)
+		spell_net.build_started.connect(_on_build_started)
+		spell_net.spell_active_update.connect(_on_spell_active_update)
+		spell_net.server_error.connect(_on_spell_error)
+	
+	if spell_cast:
+		spell_cast.scene_root = get_parent()  # Set scene root for spawning
+		spell_cast.spell_cast_complete.connect(_on_spell_cast_complete)
+		spell_cast.spell_cast_failed.connect(_on_spell_cast_failed)
+	
 	# Auto-connect to server
 	if auto_connect:
 		call_deferred("_connect_to_server")
@@ -70,6 +97,7 @@ func _connect_to_server() -> void:
 
 func _on_connected() -> void:
 	print("[Client] Connected to backend!")
+	print("[Client] Press 5/6 to build demo spells, 7/8 to publish, 3/4 to cast")
 
 
 func _on_disconnected() -> void:
@@ -78,7 +106,7 @@ func _on_disconnected() -> void:
 
 func _on_connection_failed() -> void:
 	print("[Client] Failed to connect to backend. Is the server running?")
-	print("[Client] Start backend with: cd ugc_backend && python app.py")
+	print("[Client] Start backend with: cd ugc_backend && python app_socketio.py")
 
 
 func _on_sync_complete() -> void:
@@ -88,6 +116,38 @@ func _on_sync_complete() -> void:
 
 func _on_spell_rejected(error: String) -> void:
 	print("[Client] Spell rejected: ", error)
+
+
+func _on_job_progress(job_id: String, stage: String, pct: int, message: String, extras: Dictionary) -> void:
+	print("[Client] Job %s: %s %d%% - %s" % [job_id.substr(0, 12), stage, pct, message])
+	
+	# Track completed revisions
+	if extras.has("revision_id"):
+		var manifest = extras.get("manifest", {})
+		var spell_id = manifest.get("spell_id", "")
+		if spell_id:
+			_latest_revisions[spell_id] = extras["revision_id"]
+			print("[Client] New revision ready: %s/%s" % [spell_id, extras["revision_id"]])
+
+
+func _on_build_started(job_id: String, spell_id: String) -> void:
+	print("[Client] Build started: ", job_id, " for ", spell_id)
+
+
+func _on_spell_active_update(spell_id: String, revision_id: String, channel: String, manifest: Dictionary) -> void:
+	print("[Client] Spell %s updated on %s: %s" % [spell_id, channel, revision_id])
+
+
+func _on_spell_error(message: String) -> void:
+	print("[Client] Spell error: ", message)
+
+
+func _on_spell_cast_complete(spell_id: String, revision_id: String) -> void:
+	print("[Client] Spell cast complete: ", spell_id)
+
+
+func _on_spell_cast_failed(spell_id: String, error: String) -> void:
+	print("[Client] Spell cast failed: ", spell_id, " - ", error)
 
 
 func _input(event: InputEvent) -> void:
@@ -113,6 +173,18 @@ func _unhandled_input(event: InputEvent) -> void:
 				_cast_create_land()
 			KEY_2:
 				_cast_dig()
+			KEY_3:
+				_cast_spell_package("demo_spark")
+			KEY_4:
+				_cast_spell_package("demo_spawn")
+			KEY_5:
+				_build_spell("demo_spark")
+			KEY_6:
+				_build_spell("demo_spawn")
+			KEY_7:
+				_publish_spell("demo_spark")
+			KEY_8:
+				_publish_spell("demo_spawn")
 			KEY_ESCAPE:
 				_release_mouse()
 
@@ -193,6 +265,10 @@ func _get_cast_target() -> Vector3:
 	return cam_pos + cam_forward * cast_distance
 
 
+# ============================================================================
+# Legacy Voxel Spells (1, 2)
+# ============================================================================
+
 func _cast_create_land() -> void:
 	if world_node == null:
 		return
@@ -232,3 +308,200 @@ func _cast_dig() -> void:
 	
 	print("[Client] Casting dig at ", target)
 	world_node.request_spell(spell)
+
+
+# ============================================================================
+# New Spell System (3-8)
+# ============================================================================
+
+func _cast_spell_package(spell_id: String) -> void:
+	"""Cast a spell using the new package system."""
+	if spell_cast == null:
+		print("[Client] SpellCastController not available")
+		return
+	
+	if net_node == null or not net_node.is_connected_to_server():
+		print("[Client] Not connected. Press C to connect.")
+		return
+	
+	var target := _get_cast_target()
+	print("[Client] Casting spell package: ", spell_id, " at ", target)
+	
+	spell_cast.cast_spell(spell_id, target, {})
+
+
+func _build_spell(spell_id: String) -> void:
+	"""Request the server to build a new revision of a spell."""
+	if spell_net == null:
+		print("[Client] SpellNet not available")
+		return
+	
+	if net_node == null or not net_node.is_connected_to_server():
+		print("[Client] Not connected. Press C to connect.")
+		return
+	
+	print("[Client] Starting build for: ", spell_id)
+	
+	# Use custom code for demo spells
+	var code := _get_demo_spell_code(spell_id)
+	
+	spell_net.start_build(spell_id, {
+		"code": code,
+		"metadata": {
+			"name": spell_id.replace("_", " ").capitalize(),
+			"description": "Demo spell: " + spell_id
+		}
+	})
+
+
+func _publish_spell(spell_id: String) -> void:
+	"""Publish the latest revision of a spell to beta channel."""
+	if spell_net == null:
+		print("[Client] SpellNet not available")
+		return
+	
+	if net_node == null or not net_node.is_connected_to_server():
+		print("[Client] Not connected. Press C to connect.")
+		return
+	
+	var revision_id: String = _latest_revisions.get(spell_id, "")
+	
+	if revision_id.is_empty():
+		print("[Client] No revision to publish for: ", spell_id)
+		print("[Client] Build one first with key 5 or 6")
+		return
+	
+	print("[Client] Publishing %s revision %s to beta" % [spell_id, revision_id])
+	spell_net.publish_revision(spell_id, revision_id, "beta")
+
+
+func _get_demo_spell_code(spell_id: String) -> String:
+	"""Get the demo spell code for a given spell ID."""
+	match spell_id:
+		"demo_spark":
+			return DEMO_SPARK_CODE
+		"demo_spawn":
+			return DEMO_SPAWN_CODE
+		_:
+			return ""
+
+
+# ============================================================================
+# Demo Spell Code Templates
+# ============================================================================
+
+const DEMO_SPARK_CODE := """extends SpellModule
+## Demo Spark - creates a burst of particles at the target location
+
+func get_manifest() -> Dictionary:
+	return {
+		"spell_id": "demo_spark",
+		"name": "Demo Spark",
+		"description": "Creates a colorful spark effect"
+	}
+
+
+func on_cast(ctx: SpellContext) -> void:
+	print("[demo_spark] Cast at: ", ctx.target_position, " by: ", ctx.caster_id)
+	
+	if ctx.world:
+		# Create multiple particle bursts with random colors
+		var colors := [Color.CYAN, Color.MAGENTA, Color.YELLOW, Color.LIME]
+		
+		for i in range(3):
+			var offset := Vector3(
+				ctx.randf_range(-1, 1),
+				ctx.randf_range(0, 2),
+				ctx.randf_range(-1, 1)
+			)
+			var color: Color = colors[ctx.randi_range(0, colors.size() - 1)]
+			
+			ctx.world.play_vfx("spark", ctx.target_position + offset, {
+				"color": color,
+				"amount": 24,
+				"speed": 8.0,
+				"lifetime": 0.8
+			})
+	
+	print("[demo_spark] Effect complete!")
+
+
+func on_tick(ctx: SpellContext, dt: float) -> void:
+	pass
+
+
+func on_cancel(ctx: SpellContext) -> void:
+	print("[demo_spark] Cancelled")
+"""
+
+
+const DEMO_SPAWN_CODE := """extends SpellModule
+## Demo Spawn - spawns a simple 3D object at the target location
+
+func get_manifest() -> Dictionary:
+	return {
+		"spell_id": "demo_spawn",
+		"name": "Demo Spawn",
+		"description": "Spawns a floating cube at the target"
+	}
+
+
+func on_cast(ctx: SpellContext) -> void:
+	print("[demo_spawn] Cast at: ", ctx.target_position, " by: ", ctx.caster_id)
+	
+	if ctx.world:
+		# Create a simple cube mesh
+		var mesh := BoxMesh.new()
+		mesh.size = Vector3(1.5, 1.5, 1.5)
+		
+		# Create a material with a random color
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(
+			ctx.randf_range(0.3, 1.0),
+			ctx.randf_range(0.3, 1.0),
+			ctx.randf_range(0.3, 1.0)
+		)
+		mat.metallic = 0.3
+		mat.roughness = 0.7
+		
+		# Spawn the mesh
+		var transform := Transform3D.IDENTITY
+		transform.origin = ctx.target_position
+		
+		var cube := ctx.world.spawn_simple_mesh(mesh, transform, mat)
+		
+		if cube:
+			# Add some rotation animation
+			var tween := cube.create_tween()
+			tween.set_loops()
+			tween.tween_property(cube, "rotation:y", TAU, 4.0)
+			
+			# Auto-destroy after 10 seconds
+			var timer := Timer.new()
+			timer.wait_time = 10.0
+			timer.one_shot = true
+			timer.timeout.connect(func(): 
+				if is_instance_valid(cube):
+					cube.queue_free()
+			)
+			cube.add_child(timer)
+			timer.start()
+			
+			print("[demo_spawn] Cube spawned!")
+	
+	# Also play a small effect
+	if ctx.world:
+		ctx.world.play_vfx("spawn_flash", ctx.target_position, {
+			"color": Color.WHITE,
+			"amount": 8,
+			"speed": 3.0
+		})
+
+
+func on_tick(ctx: SpellContext, dt: float) -> void:
+	pass
+
+
+func on_cancel(ctx: SpellContext) -> void:
+	print("[demo_spawn] Cancelled")
+"""

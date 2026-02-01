@@ -1,190 +1,198 @@
-# UGC World Backend Server
+# UGC World Backend
 
-A Python WebSocket server that handles the game's server-side logic:
-- Client connections
-- Spell validation and compilation to ops
-- Broadcasting ops to all connected clients
-- Late-join synchronization via op_log replay
+A Python WebSocket server for the Player Created World spell system.
 
-## Requirements
+## Features
 
-- Python 3.10+
-- websockets library
+- **Spell Package System**: Create, build, and distribute versioned spell packages
+- **Build Pipeline**: Background job worker for iterative spell creation
+- **Hot-Loading Support**: Clients can download and use new spells without restart
+- **Multiplayer Sync**: Deterministic spell execution across all clients
+- **Legacy Voxel Ops**: Backward-compatible world operations (add/subtract spheres)
 
-## Installation
+## Quick Start
 
+1. **Install dependencies**:
 ```bash
 cd ugc_backend
 pip install -r requirements.txt
 ```
 
-## Running the Server
-
+2. **Run the server**:
 ```bash
 python app.py
 ```
 
-The server will start on `ws://0.0.0.0:5000` by default.
-
-## Configuration
-
-Edit the constants in `app.py` to change:
-- `HOST`: Server bind address (default: `"0.0.0.0"`)
-- `PORT`: Server port (default: `5000`)
-
-## Protocol
-
-The server uses JSON messages over WebSocket.
-
-### Client → Server Messages
-
-#### request_spell
-Request to cast a spell. Server validates and broadcasts resulting ops.
-
-```json
-{
-    "type": "request_spell",
-    "spell": {
-        "type": "create_land",
-        "center": {"x": 0, "y": 10, "z": 0},
-        "radius": 8.0,
-        "material_id": 1
-    }
-}
-```
-
-Spell types:
-- `create_land`: Creates terrain (add_sphere op)
-- `dig`: Removes terrain (subtract_sphere op)
-
-#### ping
-Connection health check.
-
-```json
-{"type": "ping"}
-```
-
-#### clear_world
-Admin command to clear all world state.
-
-```json
-{"type": "clear_world"}
-```
-
-### Server → Client Messages
-
-#### sync_ops
-Sent on connection with all existing ops for late-join sync.
-
-```json
-{
-    "type": "sync_ops",
-    "ops": [
-        {"op": "add_sphere", "center": {"x": 0, "y": 0, "z": 0}, "radius": 8.0, "material_id": 1}
-    ]
-}
-```
-
-#### sync_complete
-Sent on connection if the world is empty.
-
-```json
-{
-    "type": "sync_complete",
-    "message": "World is empty"
-}
-```
-
-#### apply_op
-Broadcast when a new operation is applied.
-
-```json
-{
-    "type": "apply_op",
-    "op": {
-        "op": "add_sphere",
-        "center": {"x": 0, "y": 10, "z": 0},
-        "radius": 8.0,
-        "material_id": 1
-    }
-}
-```
-
-#### spell_rejected
-Sent when a spell request is invalid.
-
-```json
-{
-    "type": "spell_rejected",
-    "error": "Missing spell type"
-}
-```
-
-#### world_cleared
-Broadcast when the world is cleared.
-
-```json
-{"type": "world_cleared"}
-```
-
-#### pong
-Response to ping.
-
-```json
-{
-    "type": "pong",
-    "clients": 2,
-    "ops": 15
-}
-```
+The server will start on `ws://0.0.0.0:5000`.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Python Backend (app.py)                      │
-├─────────────────────────────────────────────────────────────────┤
-│  WebSocket Server (ws://0.0.0.0:5000)                           │
-│    ├── handle_client() - connection lifecycle                   │
-│    ├── handle_message() - route incoming messages               │
-│    ├── compile_spell_to_ops() - spell → ops conversion          │
-│    ├── validate_spell() - security/validation                   │
-│    └── broadcast() - send to all clients                        │
-│                                                                  │
-│  State:                                                          │
-│    ├── op_log[] - canonical operation history                   │
-│    └── connected_clients{} - active connections                 │
-└─────────────────────────────────────────────────────────────────┘
-                              ▲
-                              │ WebSocket
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     Godot Client                                 │
-├─────────────────────────────────────────────────────────────────┤
-│  Net.gd - WebSocket connection                                   │
-│  World.gd - op handling, spell requests                          │
-│  VoxelBackend.gd - terrain visualization                         │
-│  ClientController.gd - player input                              │
-└─────────────────────────────────────────────────────────────────┘
+ugc_backend/
+├── app.py              # Main WebSocket server
+├── database.py         # SQLite database for spell metadata
+├── spell_storage.py    # File system storage for spell packages
+├── job_worker.py       # Background build job processor
+└── data/               # Generated at runtime
+    ├── spells.db       # SQLite database
+    └── spells/         # Spell revision files
+        └── <spell_id>/
+            └── revisions/
+                └── <revision_id>/
+                    ├── manifest.json
+                    ├── code/spell.gd
+                    └── assets/...
 ```
 
-## Adding Validation
+## API
 
-Extend `validate_spell()` in `app.py`:
+### Spell Management
+
+| Message Type | Request Data | Description |
+|--------------|--------------|-------------|
+| `spell.create_draft` | `{spell_id?}` | Create new spell (generates ID if not provided) |
+| `spell.start_build` | `{spell_id, code?, prompt?, options?}` | Start build job |
+| `spell.publish` | `{spell_id, revision_id, channel}` | Publish to channel |
+| `spell.list` | `{}` | List all spells |
+| `spell.get_revisions` | `{spell_id}` | Get spell revisions |
+| `spell.cast_request` | `{spell_id, revision_id?, cast_params}` | Request spell cast |
+
+### Content Distribution
+
+| Message Type | Request Data | Description |
+|--------------|--------------|-------------|
+| `content.get_manifest` | `{spell_id, revision_id}` | Get revision manifest |
+| `content.get_file` | `{spell_id, revision_id, path}` | Get file (base64 encoded) |
+| `content.list_files` | `{spell_id, revision_id}` | List revision files |
+
+### Server Events
+
+| Event Type | Data | Description |
+|------------|------|-------------|
+| `connected` | `{client_id, server_time}` | Connection established |
+| `job.progress` | `{job_id, stage, pct, message, ...}` | Build progress |
+| `spell.build_started` | `{job_id, spell_id}` | Build job started |
+| `spell.revision_ready` | `{spell_id, revision_id, manifest}` | New revision available |
+| `spell.active_update` | `{spell_id, revision_id, channel}` | Active revision changed |
+| `spell.cast_event` | `{spell_id, revision_id, caster_id, ...}` | Execute spell cast |
+
+### Legacy World Ops
+
+| Message Type | Request Data | Description |
+|--------------|--------------|-------------|
+| `request_spell` | `{spell: {type, center, radius, ...}}` | Legacy voxel operation |
+| `ping` | `{}` | Ping server |
+| `clear_world` | `{}` | Clear world state |
+
+## Build Job Stages
+
+When a build job runs, it progresses through these stages:
+
+1. **prepare** (0-15%): Setup build environment
+2. **assemble_package** (20-55%): Write code and assets
+3. **validate** (60-75%): Check spell interface
+4. **finalize** (80-95%): Compute hashes, write manifest
+5. **done** (100%): Build complete
+
+## Database Schema
+
+```sql
+-- Spell identity and active revisions
+CREATE TABLE spells (
+    spell_id TEXT PRIMARY KEY,
+    display_name TEXT,
+    active_draft_rev TEXT,
+    active_beta_rev TEXT,
+    active_stable_rev TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+
+-- Immutable revision builds
+CREATE TABLE revisions (
+    revision_id TEXT PRIMARY KEY,
+    spell_id TEXT,
+    parent_revision_id TEXT,
+    channel TEXT,
+    version INTEGER,
+    manifest_json TEXT,
+    created_at TEXT
+);
+
+-- Build jobs
+CREATE TABLE jobs (
+    job_id TEXT PRIMARY KEY,
+    spell_id TEXT,
+    draft_id TEXT,
+    status TEXT,
+    stage TEXT,
+    progress_pct INTEGER,
+    logs TEXT,
+    error_message TEXT,
+    result_revision_id TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+```
+
+## Example: Creating a Spell Manually
 
 ```python
-def validate_spell(spell: dict) -> tuple[bool, str]:
-    # Check mana
-    # Check cooldowns
-    # Check permissions
-    # Anti-cheat validation
-    return True, ""
+from database import init_database, create_spell, create_revision, update_spell_active_revision
+from spell_storage import create_revision_directory, write_revision_file_text, write_manifest, create_manifest
+
+# Initialize
+init_database()
+
+# Create spell
+spell_id = "my_fireball"
+create_spell(spell_id, "My Fireball")
+
+# Create revision
+revision_id = "rev_000001"
+create_revision_directory(spell_id, revision_id)
+
+# Write spell code
+code = '''extends SpellModule
+
+func on_cast(ctx: SpellContext) -> void:
+    print("Fireball!")
+    ctx.world.play_vfx("fire", ctx.target_position, {"color": Color.ORANGE})
+'''
+code_info = write_revision_file_text(spell_id, revision_id, "code/spell.gd", code)
+
+# Write manifest
+manifest = create_manifest(
+    spell_id=spell_id,
+    revision_id=revision_id,
+    version=1,
+    code_files=[code_info]
+)
+write_manifest(spell_id, revision_id, manifest)
+
+# Register and publish
+create_revision(revision_id, spell_id, manifest, "beta", 1)
+update_spell_active_revision(spell_id, "beta", revision_id)
 ```
 
-## Persistence
+## Environment Variables
 
-Currently, `op_log` is in-memory and lost on restart. To add persistence:
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HOST` | `0.0.0.0` | Server bind address |
+| `PORT` | `5000` | Server port |
 
-1. Save `op_log` to a database or file
-2. Load on server start
-3. Consider op compaction for large worlds
+## Development
+
+The server uses plain WebSocket for Godot compatibility (no Socket.IO protocol).
+
+For testing with multiple clients:
+1. Start the server
+2. Open multiple Godot instances
+3. Connect all to the same server
+4. Build/publish spells from one client
+5. All clients receive updates and can cast immediately
+
+## See Also
+
+- [Spell System Documentation](../player-created-world/docs/SPELLS.md)
