@@ -27,6 +27,8 @@ Thumbs.db
 
 # Temp files
 *.tmp
+~*
+*.TMP
 
 # Local tools
 .godot_voxel_editor/
