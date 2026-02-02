@@ -1,0 +1,78 @@
+#!/usr/bin/env python
+"""
+SConstruct for Local LLM GDExtension
+
+Build with:
+    scons platform=windows target=template_debug
+    scons platform=linux target=template_release
+"""
+
+import os
+import sys
+
+# Add godot-cpp path
+env = SConscript("godot-cpp/SConstruct")
+
+# For the reference:
+# - CCFLAGS are compilation flags shared between C and C++
+# - CFLAGS are for C-specific compilation flags
+# - CXXFLAGS are for C++-specific compilation flags
+# - CPPFLAGS are for pre-processor flags
+# - CPPDEFINES are for pre-processor defines
+# - LINKFLAGS are for linking flags
+
+# Add source files
+env.Append(CPPPATH=[".", "llama.cpp/include", "llama.cpp/ggml/include"])
+
+sources = [
+    "register_types.cpp",
+    "llm_generation_handle.cpp",
+    "llama_cpp_provider.cpp",
+]
+
+# Link llama.cpp static library
+platform = env["platform"]
+target = env["target"]
+
+if platform == "windows":
+    # Always use Release builds of llama.cpp - godot-cpp's template_debug uses
+    # release runtime (/MT) with debug symbols, not MSVC debug runtime (/MTd)
+    llama_lib = "llama.cpp/build/src/Release/llama.lib"
+    ggml_lib = "llama.cpp/build/ggml/src/Release/ggml.lib"
+    ggml_base_lib = "llama.cpp/build/ggml/src/Release/ggml-base.lib"
+    ggml_cpu_lib = "llama.cpp/build/ggml/src/Release/ggml-cpu.lib"
+    env.Append(LIBS=[llama_lib, ggml_lib, ggml_base_lib, ggml_cpu_lib])
+    env.Append(LIBS=["ws2_32", "Advapi32"])  # Windows sockets + registry for ggml
+else:
+    llama_lib = "llama.cpp/build/libllama.a"
+    ggml_lib = "llama.cpp/build/libggml.a"
+    env.Append(LIBS=[llama_lib, ggml_lib])
+    env.Append(LIBS=["pthread", "dl"])
+
+# Determine library name
+if platform == "macos":
+    library = env.SharedLibrary(
+        "../bin/liblocal_llm.{}.{}.universal.dylib".format(
+            "macos",
+            "editor" if target == "template_debug" else "template_release"
+        ),
+        source=sources,
+    )
+elif platform == "windows":
+    library = env.SharedLibrary(
+        "../bin/liblocal_llm.{}.{}.x86_64.dll".format(
+            "windows",
+            "editor" if target == "template_debug" else "template_release"
+        ),
+        source=sources,
+    )
+else:
+    library = env.SharedLibrary(
+        "../bin/liblocal_llm.{}.{}.x86_64.so".format(
+            "linux",
+            "editor" if target == "template_debug" else "template_release"
+        ),
+        source=sources,
+    )
+
+Default(library)

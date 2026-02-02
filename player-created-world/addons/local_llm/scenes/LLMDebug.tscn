@@ -1,0 +1,235 @@
+[gd_scene load_steps=2 format=3 uid="uid://local_llm_debug"]
+
+[ext_resource type="Script" path="res://addons/local_llm/scripts/LLMDebugUI.gd" id="1_script"]
+
+[node name="LLMDebug" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_script")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.08, 0.09, 0.12, 1)
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 20
+
+[node name="VBox" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Header" type="HBoxContainer" parent="MarginContainer/VBox"]
+layout_mode = 2
+
+[node name="Title" type="Label" parent="MarginContainer/VBox/Header"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.88, 0.95, 1)
+theme_override_font_sizes/font_size = 24
+text = "🧠 Local LLM Debug"
+
+[node name="Spacer" type="Control" parent="MarginContainer/VBox/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="StatusLabel" type="Label" parent="MarginContainer/VBox/Header"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.65, 0.75, 1)
+theme_override_font_sizes/font_size = 14
+text = "Status: Not initialized"
+
+[node name="ModelSection" type="HBoxContainer" parent="MarginContainer/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ModelLabel" type="Label" parent="MarginContainer/VBox/ModelSection"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.75, 0.85, 1)
+text = "Model:"
+
+[node name="ModelSelector" type="OptionButton" parent="MarginContainer/VBox/ModelSection"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(350, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.92, 0.97, 1)
+
+[node name="LoadButton" type="Button" parent="MarginContainer/VBox/ModelSection"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.92, 0.97, 1)
+text = "Load Model"
+
+[node name="UnloadButton" type="Button" parent="MarginContainer/VBox/ModelSection"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.92, 0.97, 1)
+text = "Unload"
+
+[node name="MemoryLabel" type="Label" parent="MarginContainer/VBox/ModelSection"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.5, 0.55, 0.65, 1)
+theme_override_font_sizes/font_size = 12
+text = "Memory: --"
+horizontal_alignment = 2
+
+[node name="PromptSection" type="VBoxContainer" parent="MarginContainer/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 8
+
+[node name="PromptLabel" type="Label" parent="MarginContainer/VBox/PromptSection"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.75, 0.85, 1)
+text = "Prompt:"
+
+[node name="PromptInput" type="TextEdit" parent="MarginContainer/VBox/PromptSection"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 120)
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_colors/font_color = Color(0.9, 0.92, 0.97, 1)
+theme_override_colors/background_color = Color(0.12, 0.13, 0.18, 1)
+placeholder_text = "Enter your prompt here..."
+wrap_mode = 1
+
+[node name="ControlsRow" type="HBoxContainer" parent="MarginContainer/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="GenerateButton" type="Button" parent="MarginContainer/VBox/ControlsRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 40)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.1, 0.12, 0.15, 1)
+theme_override_colors/font_pressed_color = Color(0.1, 0.12, 0.15, 1)
+theme_override_colors/font_hover_color = Color(0.1, 0.12, 0.15, 1)
+text = "▶ Generate"
+
+[node name="StopButton" type="Button" parent="MarginContainer/VBox/ControlsRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(100, 40)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.92, 0.97, 1)
+disabled = true
+text = "⏹ Stop"
+
+[node name="ClearButton" type="Button" parent="MarginContainer/VBox/ControlsRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.92, 0.97, 1)
+text = "Clear"
+
+[node name="Spacer" type="Control" parent="MarginContainer/VBox/ControlsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="MaxTokensLabel" type="Label" parent="MarginContainer/VBox/ControlsRow"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.65, 0.75, 1)
+text = "Max Tokens:"
+
+[node name="MaxTokensSpinBox" type="SpinBox" parent="MarginContainer/VBox/ControlsRow"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 16.0
+max_value = 4096.0
+step = 16.0
+value = 512.0
+
+[node name="TempLabel" type="Label" parent="MarginContainer/VBox/ControlsRow"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.65, 0.75, 1)
+text = "Temp:"
+
+[node name="TempSpinBox" type="SpinBox" parent="MarginContainer/VBox/ControlsRow"]
+unique_name_in_owner = true
+layout_mode = 2
+min_value = 0.0
+max_value = 2.0
+step = 0.1
+value = 0.7
+
+[node name="OutputSection" type="VBoxContainer" parent="MarginContainer/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="OutputLabel" type="Label" parent="MarginContainer/VBox/OutputSection"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.75, 0.85, 1)
+text = "Output:"
+
+[node name="OutputDisplay" type="RichTextLabel" parent="MarginContainer/VBox/OutputSection"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_colors/default_color = Color(0.8, 0.95, 0.8, 1)
+theme_override_colors/font_selected_color = Color(0.1, 0.12, 0.15, 1)
+theme_override_colors/selection_color = Color(0.3, 0.5, 0.8, 0.5)
+bbcode_enabled = true
+scroll_following = true
+selection_enabled = true
+
+[node name="StatsBar" type="HBoxContainer" parent="MarginContainer/VBox"]
+layout_mode = 2
+
+[node name="TokensLabel" type="Label" parent="MarginContainer/VBox/StatsBar"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.5, 0.55, 0.65, 1)
+theme_override_font_sizes/font_size = 12
+text = "Tokens: 0"
+
+[node name="Sep1" type="Label" parent="MarginContainer/VBox/StatsBar"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.3, 0.35, 0.45, 1)
+text = " | "
+
+[node name="SpeedLabel" type="Label" parent="MarginContainer/VBox/StatsBar"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.5, 0.55, 0.65, 1)
+theme_override_font_sizes/font_size = 12
+text = "Speed: -- t/s"
+
+[node name="Sep2" type="Label" parent="MarginContainer/VBox/StatsBar"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.3, 0.35, 0.45, 1)
+text = " | "
+
+[node name="ElapsedLabel" type="Label" parent="MarginContainer/VBox/StatsBar"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.5, 0.55, 0.65, 1)
+theme_override_font_sizes/font_size = 12
+text = "Elapsed: 0.0s"
+
+[node name="Spacer" type="Control" parent="MarginContainer/VBox/StatsBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="BackendLabel" type="Label" parent="MarginContainer/VBox/StatsBar"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.4, 0.6, 0.8, 1)
+theme_override_font_sizes/font_size = 12
+text = "Backend: --"

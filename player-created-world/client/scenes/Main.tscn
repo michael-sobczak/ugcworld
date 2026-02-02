@@ -1,7 +1,9 @@
-[gd_scene load_steps=6 format=3 uid="uid://client_main"]
+[gd_scene format=3 uid="uid://dde58ajm62tq3"]
 
-[ext_resource type="Script" path="res://client/scripts/ClientController.gd" id="1_client"]
+[ext_resource type="Script" uid="uid://bigwr4rd7dcbm" path="res://client/scripts/ClientController.gd" id="1_client"]
 [ext_resource type="Script" path="res://shared/scripts/world/VoxelBackend.gd" id="2_voxel"]
+[ext_resource type="PackedScene" uid="uid://cbgwn5ggkciuq" path="res://client/scenes/LLMChatHUD.tscn" id="3_llmhud"]
+[ext_resource type="PackedScene" path="res://client/scenes/ConnectionDialog.tscn" id="4_conndlg"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_1"]
 sky_top_color = Color(0.35, 0.55, 0.85, 1)
@@ -21,26 +23,30 @@ ambient_light_energy = 0.5
 tonemap_mode = 2
 glow_enabled = true
 
-[node name="Main" type="Node3D"]
+[node name="Main" type="Node3D" unique_id=347338857]
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=668870509]
 environment = SubResource("Environment_1")
 
-[node name="Camera3D" type="Camera3D" parent="."]
+[node name="Camera3D" type="Camera3D" parent="." unique_id=371509545]
 transform = Transform3D(1, 0, 0, 0, 0.866, 0.5, 0, -0.5, 0.866, 0, 25, 40)
 current = true
 fov = 70.0
 
-[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=599205501]
 transform = Transform3D(0.866, 0.25, -0.433, 0, 0.866, 0.5, 0.5, -0.433, 0.75, 0, 50, 0)
 light_color = Color(1, 0.97, 0.9, 1)
 light_energy = 1.2
 shadow_enabled = true
 
-[node name="VoxelWorld" type="Node3D" parent="."]
+[node name="VoxelWorld" type="Node3D" parent="." unique_id=1601610647]
 
-[node name="VoxelBackend" type="Node" parent="VoxelWorld"]
+[node name="VoxelBackend" type="Node" parent="VoxelWorld" unique_id=1791165937]
 script = ExtResource("2_voxel")
 
-[node name="ClientController" type="Node" parent="."]
+[node name="ClientController" type="Node" parent="." unique_id=1615734095]
 script = ExtResource("1_client")
+
+[node name="LLMChatHUD" parent="." unique_id=656070106 instance=ExtResource("3_llmhud")]
+
+[node name="ConnectionDialog" parent="." unique_id=1556652101 instance=ExtResource("4_conndlg")]

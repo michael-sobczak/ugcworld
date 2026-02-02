@@ -4,7 +4,7 @@ extends Node
 ## Connects to the Python backend server.
 ##
 ## Controls:
-## - C or Enter: Connect to server
+## - C or Enter: Open connection dialog (choose localhost/production/custom)
 ## - 1: Cast create_land spell (legacy voxel op)
 ## - 2: Cast dig spell (legacy voxel op)
 ## - 3: Cast demo_spark spell (new spell system)
@@ -29,7 +29,7 @@ extends Node
 ## Server settings
 @export var server_host: String = "127.0.0.1"
 @export var server_port: int = 5000
-@export var auto_connect: bool = true
+@export var auto_connect: bool = false  # Disabled - use dialog instead
 
 ## References
 var camera: Camera3D = null
@@ -38,6 +38,7 @@ var world_node: Node = null
 var spell_net: Node = null
 var spell_cast: Node = null
 var spell_registry: Node = null
+var connection_dialog: Node = null
 
 ## State
 var _mouse_captured: bool = false
@@ -60,6 +61,11 @@ func _ready() -> void:
 	if camera:
 		var euler = camera.global_transform.basis.get_euler()
 		_camera_rotation = Vector2(euler.y, euler.x)
+	
+	# Find connection dialog in scene
+	connection_dialog = get_node_or_null("../ConnectionDialog")
+	if connection_dialog:
+		connection_dialog.connection_requested.connect(_on_connection_url_requested)
 	
 	# Connect to network signals
 	if net_node:
@@ -84,20 +90,44 @@ func _ready() -> void:
 		spell_cast.spell_cast_complete.connect(_on_spell_cast_complete)
 		spell_cast.spell_cast_failed.connect(_on_spell_cast_failed)
 	
-	# Auto-connect to server
+	# Auto-connect to server (if enabled, will use default localhost)
 	if auto_connect:
 		call_deferred("_connect_to_server")
+	else:
+		print("[Client] Press C to open connection dialog")
 
 
 func _connect_to_server() -> void:
+	"""Legacy connect using host/port - used for auto_connect."""
 	if net_node:
 		print("[Client] Connecting to backend at %s:%d..." % [server_host, server_port])
 		net_node.connect_to_server(server_host, server_port)
 
 
+func _show_connection_dialog() -> void:
+	"""Show the connection dialog for server selection."""
+	if connection_dialog:
+		connection_dialog.show_dialog()
+	else:
+		# Fallback to direct localhost connection if no dialog
+		print("[Client] No connection dialog found, using localhost")
+		_connect_to_server()
+
+
+func _on_connection_url_requested(url: String) -> void:
+	"""Handle connection request from dialog."""
+	if net_node:
+		print("[Client] Connecting to: ", url)
+		net_node.connect_to_url(url)
+
+
 func _on_connected() -> void:
 	print("[Client] Connected to backend!")
 	print("[Client] Press 5/6 to build demo spells, 7/8 to publish, 3/4 to cast")
+	
+	# Notify dialog of success
+	if connection_dialog:
+		connection_dialog.show_success("Connected!")
 
 
 func _on_disconnected() -> void:
@@ -107,6 +137,10 @@ func _on_disconnected() -> void:
 func _on_connection_failed() -> void:
 	print("[Client] Failed to connect to backend. Is the server running?")
 	print("[Client] Start backend with: cd ugc_backend && python app_socketio.py")
+	
+	# Notify dialog of failure
+	if connection_dialog:
+		connection_dialog.show_error("Connection failed. Is the server running?")
 
 
 func _on_sync_complete() -> void:
@@ -168,7 +202,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
 			KEY_C, KEY_ENTER:
-				_connect_to_server()
+				_show_connection_dialog()
 			KEY_1:
 				_cast_create_land()
 			KEY_2:

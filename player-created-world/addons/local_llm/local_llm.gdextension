@@ -1,0 +1,19 @@
+[configuration]
+
+entry_symbol = "local_llm_library_init"
+compatibility_minimum = "4.4"
+
+[libraries]
+; Desktop platforms only - local LLM is too heavy for mobile
+
+windows.debug.x86_64 = "./bin/liblocal_llm.windows.editor.x86_64.dll"
+windows.release.x86_64 = "./bin/liblocal_llm.windows.template_release.x86_64.dll"
+
+linux.debug.x86_64 = "./bin/liblocal_llm.linux.editor.x86_64.so"
+linux.release.x86_64 = "./bin/liblocal_llm.linux.template_release.x86_64.so"
+
+macos.debug = "./bin/liblocal_llm.macos.editor.universal.dylib"
+macos.release = "./bin/liblocal_llm.macos.template_release.universal.dylib"
+
+[dependencies]
+; llama.cpp is statically linked, no external dependencies

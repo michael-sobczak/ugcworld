@@ -1,0 +1,19 @@
+# Build artifacts
+bin/*.dll
+bin/*.so
+bin/*.dylib
+
+# Submodules (clone separately)
+src/llama.cpp/
+src/godot-cpp/
+
+# Build directories
+src/build/
+*.obj
+*.o
+*.lib
+*.a
+
+# IDE
+.vscode/
+*.sublime-*

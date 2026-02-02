@@ -1,0 +1,76 @@
+{
+	"version": "1.0",
+	"description": "Local LLM Model Registry - Add models here to make them available in-game",
+	"models": [
+		{
+			"id": "qwen2.5-coder-14b-q4_k_m",
+			"display_name": "Qwen 2.5 Coder 14B (Q4_K_M)",
+			"backend": "llama.cpp",
+			"context_length": 32768,
+			"recommended_threads": 8,
+			"quantization": "Q4_K_M",
+			"file_path_in_pck": "res://models/qwen2.5-coder-14b-instruct-q4_k_m.gguf",
+			"sha256": "",
+			"size_bytes": 8693714944,
+			"estimated_memory": 10432457932,
+			"description": "Qwen 2.5 Coder 14B optimized for code generation and understanding. Q4_K_M quantization offers a good balance of quality and speed.",
+			"tags": ["coding", "14b", "quantized", "default"],
+			"prompt_template": {
+				"system_prefix": "<|im_start|>system\n",
+				"system_suffix": "<|im_end|>\n",
+				"user_prefix": "<|im_start|>user\n",
+				"user_suffix": "<|im_end|>\n",
+				"assistant_prefix": "<|im_start|>assistant\n",
+				"assistant_suffix": "<|im_end|>\n"
+			}
+		},
+		{
+			"id": "qwen2.5-coder-14b-q5_k_m",
+			"display_name": "Qwen 2.5 Coder 14B (Q5_K_M)",
+			"backend": "llama.cpp",
+			"context_length": 32768,
+			"recommended_threads": 8,
+			"quantization": "Q5_K_M",
+			"file_path_in_pck": "res://models/qwen2.5-coder-14b-instruct-q5_k_m.gguf",
+			"sha256": "",
+			"size_bytes": 10420000000,
+			"estimated_memory": 12504000000,
+			"description": "Qwen 2.5 Coder 14B with higher quality Q5_K_M quantization. Better accuracy but requires more memory.",
+			"tags": ["coding", "14b", "quantized", "high-quality"],
+			"prompt_template": {
+				"system_prefix": "<|im_start|>system\n",
+				"system_suffix": "<|im_end|>\n",
+				"user_prefix": "<|im_start|>user\n",
+				"user_suffix": "<|im_end|>\n",
+				"assistant_prefix": "<|im_start|>assistant\n",
+				"assistant_suffix": "<|im_end|>\n"
+			}
+		}
+	],
+	"presets": {
+		"coding": {
+			"temperature": 0.3,
+			"top_p": 0.9,
+			"top_k": 40,
+			"repeat_penalty": 1.1,
+			"max_tokens": 1024,
+			"system_prompt": "You are a helpful coding assistant. Provide clear, concise, and correct code solutions."
+		},
+		"creative": {
+			"temperature": 0.9,
+			"top_p": 0.95,
+			"top_k": 50,
+			"repeat_penalty": 1.05,
+			"max_tokens": 512,
+			"system_prompt": "You are a creative writing assistant."
+		},
+		"precise": {
+			"temperature": 0.1,
+			"top_p": 0.8,
+			"top_k": 20,
+			"repeat_penalty": 1.2,
+			"max_tokens": 256,
+			"system_prompt": "You are a precise technical assistant. Be accurate and concise."
+		}
+	}
+}

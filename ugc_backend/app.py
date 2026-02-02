@@ -13,11 +13,13 @@ Run with: python app.py
 
 import asyncio
 import websockets
+from http import HTTPStatus
 import json
 import logging
 import uuid
 import base64
 import threading
+import os
 from datetime import datetime
 from typing import Dict, Any, Set
 
@@ -42,9 +44,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Server configuration
-HOST = "0.0.0.0"
-PORT = 5000
+# Server configuration (from environment or defaults)
+HOST = os.environ.get("HOST", "0.0.0.0")
+PORT = int(os.environ.get("PORT", "5000"))
 
 # Server state
 connected_clients: Set[websockets.WebSocketServerProtocol] = set()
@@ -52,6 +54,36 @@ op_log: list[dict] = []  # Legacy world ops
 
 # Event loop reference for cross-thread communication
 main_loop: asyncio.AbstractEventLoop = None
+
+
+# ============================================================================
+# HTTP Health Check Handler (websockets 12+ API)
+# ============================================================================
+
+def process_request(connection, request):
+    """
+    Handle HTTP requests before WebSocket upgrade.
+    Uses connection.respond() for health checks, returns None for WebSocket.
+    
+    This is called by websockets.serve() for every incoming connection.
+    For health check endpoints, we respond with HTTP 200 directly.
+    For WebSocket connections, we return None to continue the handshake.
+    """
+    # Health check endpoints - respond to plain HTTP requests
+    if request.path in ("/health", "/api/health", "/healthz"):
+        # Check if this is NOT a WebSocket upgrade request
+        upgrade_header = request.headers.get("Upgrade", "")
+        if upgrade_header.lower() != "websocket":
+            # Use connection.respond() to send HTTP response
+            body = json.dumps({
+                "status": "ok",
+                "clients": len(connected_clients),
+                "server": "ugc-world-backend"
+            })
+            return connection.respond(HTTPStatus.OK, body)
+    
+    # Continue with WebSocket handshake
+    return None
 
 
 # ============================================================================
@@ -509,9 +541,18 @@ async def main():
     start_worker(on_job_progress)
     
     print(f"WebSocket server starting on ws://{HOST}:{PORT}")
+    print(f"Health check available at http://{HOST}:{PORT}/health")
     print("=" * 60)
     
-    async with websockets.serve(handle_client, HOST, PORT):
+    async with websockets.serve(
+        handle_client,
+        HOST,
+        PORT,
+        process_request=process_request,
+        # Increase timeouts for production
+        ping_interval=30,
+        ping_timeout=30,
+    ):
         logger.info(f"Server listening on ws://{HOST}:{PORT}")
         await asyncio.Future()  # Run forever
 

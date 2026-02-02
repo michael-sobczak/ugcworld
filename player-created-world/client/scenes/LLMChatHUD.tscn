@@ -1,0 +1,106 @@
+[gd_scene format=3 uid="uid://cbgwn5ggkciuq"]
+
+[ext_resource type="Script" path="res://client/scripts/LLMChatHUD.gd" id="1_script"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
+bg_color = Color(0.08, 0.08, 0.12, 0.95)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.3, 0.5, 0.8, 0.8)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[node name="LLMChatHUD" type="CanvasLayer"]
+layer = 10
+script = ExtResource("1_script")
+
+[node name="ToggleButton" type="Button" parent="."]
+offset_left = 20.0
+offset_top = 20.0
+offset_right = 70.0
+offset_bottom = 70.0
+theme_override_font_sizes/font_size = 24
+text = "💬"
+flat = false
+
+[node name="ChatPanel" type="PanelContainer" parent="."]
+visible = false
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -450.0
+offset_top = 10.0
+offset_right = -10.0
+offset_bottom = -10.0
+grow_horizontal = 0
+theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+
+[node name="VBox" type="VBoxContainer" parent="ChatPanel"]
+layout_mode = 2
+
+[node name="Header" type="HBoxContainer" parent="ChatPanel/VBox"]
+layout_mode = 2
+
+[node name="TitleLabel" type="Label" parent="ChatPanel/VBox/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.7, 0.85, 1, 1)
+theme_override_font_sizes/font_size = 18
+text = "🤖 Local LLM Chat"
+
+[node name="OutputScroll" type="ScrollContainer" parent="ChatPanel/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="OutputLabel" type="RichTextLabel" parent="ChatPanel/VBox/OutputScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+bbcode_enabled = true
+text = "[color=gray]Welcome to Local LLM Chat!
+
+Press Ctrl+Enter or click Send to submit your message.
+[/color]
+"
+fit_content = true
+scroll_following = true
+selection_enabled = true
+
+[node name="InputContainer" type="HBoxContainer" parent="ChatPanel/VBox"]
+layout_mode = 2
+
+[node name="InputField" type="TextEdit" parent="ChatPanel/VBox/InputContainer"]
+custom_minimum_size = Vector2(0, 80)
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Type your message here... (Ctrl+Enter to send)"
+wrap_mode = 1
+
+[node name="SendButton" type="Button" parent="ChatPanel/VBox/InputContainer"]
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+text = "Send"
+
+[node name="StatusBar" type="HBoxContainer" parent="ChatPanel/VBox"]
+layout_mode = 2
+
+[node name="StatusLabel" type="Label" parent="ChatPanel/VBox/StatusBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.5, 0.5, 0.5, 1)
+theme_override_font_sizes/font_size = 12
+text = "○ No model loaded"
+
+[node name="LoadingIndicator" type="Label" parent="ChatPanel/VBox/StatusBar"]
+visible = false
+layout_mode = 2
+theme_override_colors/font_color = Color(0.4, 0.8, 1, 1)
+theme_override_font_sizes/font_size = 12
+text = "⏳ Generating..."

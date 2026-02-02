@@ -42,3 +42,6 @@ venv/
 
 # UGC Backend generated data
 ugc_backend/data/
+env.sh
+
+player-created-world/models/*.gguf

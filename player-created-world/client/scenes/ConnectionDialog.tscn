@@ -1,0 +1,76 @@
+[gd_scene load_steps=2 format=3 uid="uid://conn_dialog_001"]
+
+[ext_resource type="Script" path="res://client/scripts/ConnectionDialog.gd" id="1_script"]
+
+[node name="ConnectionDialog" type="CanvasLayer"]
+script = ExtResource("1_script")
+
+[node name="Panel" type="PanelContainer" parent="."]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -180.0
+offset_top = -140.0
+offset_right = 180.0
+offset_bottom = 140.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="Panel"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Connect to Server"
+horizontal_alignment = 1
+
+[node name="Separator1" type="HSeparator" parent="Panel/VBox"]
+layout_mode = 2
+
+[node name="LocalhostBtn" type="Button" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "🖥️  Localhost (Development)"
+
+[node name="ProductionBtn" type="Button" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "☁️  Production (fly.io)"
+
+[node name="Separator2" type="HSeparator" parent="Panel/VBox"]
+layout_mode = 2
+
+[node name="CustomLabel" type="Label" parent="Panel/VBox"]
+layout_mode = 2
+text = "Or enter custom URL:"
+horizontal_alignment = 1
+
+[node name="CustomContainer" type="HBoxContainer" parent="Panel/VBox"]
+layout_mode = 2
+
+[node name="CustomURL" type="LineEdit" parent="Panel/VBox/CustomContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "ws://host:port"
+
+[node name="ConnectBtn" type="Button" parent="Panel/VBox/CustomContainer"]
+layout_mode = 2
+text = "Connect"
+
+[node name="Separator3" type="HSeparator" parent="Panel/VBox"]
+layout_mode = 2
+
+[node name="StatusLabel" type="Label" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+text = "Choose a server to connect to"
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="CancelBtn" type="Button" parent="Panel/VBox"]
+layout_mode = 2
+text = "Cancel"

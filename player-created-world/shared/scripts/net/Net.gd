@@ -5,6 +5,8 @@ extends Node
 
 const DEFAULT_HOST := "127.0.0.1"
 const DEFAULT_PORT := 5000
+const LOCALHOST_URL := "ws://127.0.0.1:5000"
+const PRODUCTION_URL := "wss://ugc-world-backend.fly.dev"
 
 signal connected_to_server
 signal disconnected_from_server
@@ -67,12 +69,18 @@ func _process(_delta: float) -> void:
 
 
 func connect_to_server(host: String = DEFAULT_HOST, port: int = DEFAULT_PORT) -> void:
-	"""Connect to the Python backend server."""
+	"""Connect to the Python backend server using host and port."""
+	var url := "ws://%s:%d" % [host, port]
+	connect_to_url(url)
+
+
+func connect_to_url(url: String) -> void:
+	"""Connect to a server using a full URL (ws:// or wss://)."""
 	if _connected or _connecting:
 		print("[Net] Already connected or connecting")
 		return
 	
-	server_url = "ws://%s:%d" % [host, port]
+	server_url = url
 	print("[Net] Connecting to ", server_url)
 	
 	_socket = WebSocketPeer.new()
