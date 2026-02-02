@@ -13,49 +13,73 @@ The Local LLM system provides:
 
 ## Architecture
 
+```mermaid
+graph TB
+    subgraph GameCode["Game Code (GDScript)"]
+        User[User Request]
+        Handler[Response Handler]
+    end
+    
+    subgraph Service["LocalLLMService (Autoload)"]
+        API[High-level API]
+        Registry[ModelRegistry]
+        Extractor[ModelExtractor]
+        Settings[LocalLLMSettings]
+    end
+    
+    subgraph Provider["LlamaCppProvider (GDExtension)"]
+        Loader[Model Loader]
+        Tokenizer[Tokenizer]
+        Sampler[Sampling Loop]
+        Worker[Worker Thread]
+    end
+    
+    subgraph LlamaCpp["llama.cpp (C++ Library)"]
+        GGUF[GGUF Parser]
+        Inference[Inference Engine]
+        CPU[CPU Backend]
+        GPU[GPU Backend]
+    end
+    
+    User --> API
+    API --> Registry
+    API --> Extractor
+    API --> Settings
+    API --> Loader
+    Loader --> GGUF
+    Tokenizer --> Inference
+    Sampler --> Inference
+    Worker --> Sampler
+    Inference --> CPU
+    Inference --> GPU
+    Worker --> Handler
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                     LocalLLMService (Autoload)                       │
-│  High-level API for game code                                        │
-├─────────────────────────────────────────────────────────────────────┤
-│  - load_model(id)           - Async model loading                    │
-│  - generate(prompt)          - Simple generation                     │
-│  - generate_streaming(req)   - Streaming with handle                 │
-│  - get_status()              - Provider/model state                  │
-└───────────────────────────────┬─────────────────────────────────────┘
-                                │
-        ┌───────────────────────┼───────────────────────┐
-        │                       │                       │
-        ▼                       ▼                       ▼
-┌───────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│ ModelRegistry │     │ ModelExtractor  │     │ LocalLLMSettings│
-│               │     │                 │     │                 │
-│ - models.json │     │ - PCK → disk    │     │ - user prefs    │
-│ - metadata    │     │ - SHA256 verify │     │ - persistence   │
-└───────────────┘     └─────────────────┘     └─────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                     LlamaCppProvider (GDExtension)                   │
-│  C++ wrapper around llama.cpp                                        │
-├─────────────────────────────────────────────────────────────────────┤
-│  - Model loading/unloading                                           │
-│  - Tokenization                                                      │
-│  - Sampling loop (temperature, top_k, top_p, etc.)                   │
-│  - Worker thread for non-blocking inference                          │
-│  - Signal-based token streaming                                      │
-└───────────────────────────────┬─────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                     llama.cpp (Static Library)                       │
-│  High-performance LLM inference engine                               │
-├─────────────────────────────────────────────────────────────────────┤
-│  - GGUF model format support                                         │
-│  - CPU inference (AVX/AVX2/AVX512)                                   │
-│  - Optional GPU acceleration (CUDA/Metal/Vulkan)                     │
-│  - Quantization support (Q4, Q5, Q8, etc.)                           │
-└─────────────────────────────────────────────────────────────────────┘
+
+## Generation Flow
+
+```mermaid
+sequenceDiagram
+    participant Game as Game Code
+    participant Service as LocalLLMService
+    participant Provider as LlamaCppProvider
+    participant Worker as Worker Thread
+    
+    Game->>Service: generate_streaming(request)
+    Service->>Service: Create handle
+    Service->>Provider: start_generation(prompt, params)
+    Provider->>Worker: Queue request
+    Service-->>Game: LLMGenerationHandle
+    
+    loop Token Generation
+        Worker->>Worker: Sample next token
+        Worker-->>Provider: token_generated signal
+        Provider-->>Service: Forward signal
+        Service-->>Game: handle.token signal
+    end
+    
+    Worker->>Provider: Generation complete
+    Provider-->>Service: generation_completed
+    Service-->>Game: handle.completed signal
 ```
 
 ## Quick Start
@@ -74,8 +98,8 @@ var handle = LocalLLMService.generate_streaming({
     "temperature": 0.7
 })
 
-handle.token.connect(func(chunk): print(chunk, end=""))
-handle.completed.connect(func(text): print("\nDone!"))
+handle.token.connect(func(chunk): print(chunk))
+handle.completed.connect(func(text): print("Done!"))
 handle.error.connect(func(err): print("Error: ", err))
 
 # Cancel if needed
@@ -85,7 +109,7 @@ handle.request_cancel()
 ### Loading a Model
 
 ```gdscript
-# Load by model ID (from models.json)
+# Load by model ID from models.json
 var result = await LocalLLMService.load_model("qwen2.5-coder-14b-q4_k_m")
 if result.success:
     print("Model loaded!")
@@ -103,30 +127,34 @@ print("Backend: ", status.backend)
 
 ```
 player-created-world/
-├── addons/
-│   └── local_llm/
-│       ├── bin/                          # Compiled extension binaries
-│       │   ├── liblocal_llm.windows.*.dll
-│       │   └── liblocal_llm.linux.*.so
-│       ├── scenes/
-│       │   └── LLMDebug.tscn             # Debug/test UI scene
-│       ├── scripts/
-│       │   ├── LocalLLMService.gd        # Main autoload singleton
-│       │   ├── ModelRegistry.gd          # Model metadata management
-│       │   ├── ModelExtractor.gd         # PCK → disk extraction
-│       │   ├── LocalLLMSettings.gd       # User settings
-│       │   └── LLMDebugUI.gd             # Debug UI controller
-│       ├── src/                          # C++ extension source
-│       │   ├── register_types.cpp
-│       │   ├── llama_cpp_provider.cpp
-│       │   ├── llm_generation_handle.cpp
-│       │   ├── llama.cpp/                # llama.cpp submodule
-│       │   └── godot-cpp/                # godot-cpp submodule
-│       ├── local_llm.gdextension
-│       └── plugin.cfg
-└── models/
-    ├── models.json                       # Model registry
-    └── *.gguf                            # GGUF model files
+    addons/
+        local_llm/
+            bin/                          # Compiled extension binaries
+                liblocal_llm.windows.editor.x86_64.dll
+                liblocal_llm.windows.template_release.x86_64.dll
+                liblocal_llm.linux.editor.x86_64.so
+                liblocal_llm.linux.template_release.x86_64.so
+            scenes/
+                LLMDebug.tscn             # Debug/test UI scene
+            scripts/
+                LocalLLMService.gd        # Main autoload singleton
+                ModelRegistry.gd          # Model metadata management
+                ModelExtractor.gd         # PCK to disk extraction
+                LocalLLMSettings.gd       # User settings
+                LLMDebugUI.gd             # Debug UI controller
+                ContextManager.gd         # Context management
+                PromptTemplates.gd        # Prompt formatting
+                ILLMProvider.gd           # Provider interface
+                LLMBenchmark.gd           # Performance testing
+            src/                          # C++ extension source
+                register_types.cpp
+                llama_cpp_provider.cpp
+                llm_generation_handle.cpp
+            local_llm.gdextension
+            plugin.cfg
+    models/
+        models.json                       # Model registry
+        qwen2.5-coder-14b-instruct-q4_k_m.gguf   # GGUF model file
 ```
 
 ## Adding a New Model
@@ -136,23 +164,23 @@ Adding a new GGUF model requires **no code changes**:
 ### Step 1: Obtain the GGUF File
 
 Download or convert your model to GGUF format. Recommended sources:
-- [Hugging Face](https://huggingface.co/models?library=gguf)
-- Convert using llama.cpp's `convert.py`
+- Hugging Face: https://huggingface.co/models?library=gguf
+- Convert using llama.cpp convert.py
 
 ### Step 2: Place the File
 
-Copy the `.gguf` file to `res://models/`:
+Copy the .gguf file to res://models/:
 
 ```
 models/
-├── models.json
-├── qwen2.5-coder-14b-instruct-q4_k_m.gguf  # existing
-└── my-new-model-q5_k_m.gguf                 # new
+    models.json
+    qwen2.5-coder-14b-instruct-q4_k_m.gguf  # existing
+    my-new-model-q5_k_m.gguf                 # new
 ```
 
 ### Step 3: Update models.json
 
-Add an entry to `models.json`:
+Add an entry to models.json:
 
 ```json
 {
@@ -189,25 +217,25 @@ sha256sum my-new-model-q5_k_m.gguf
 Get-FileHash my-new-model-q5_k_m.gguf -Algorithm SHA256
 ```
 
-Add the hash to `models.json` for integrity verification.
+Add the hash to models.json for integrity verification.
 
 ## Model Registry Schema
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `id` | string | ✓ | Unique identifier |
-| `display_name` | string | | Human-readable name |
-| `backend` | string | | Backend type (always "llama.cpp") |
-| `context_length` | int | | Max context window size |
-| `recommended_threads` | int | | Suggested CPU thread count |
-| `quantization` | string | | Quantization method (Q4_K_M, etc.) |
-| `file_path_in_pck` | string | ✓ | Path in Godot project |
-| `sha256` | string | | SHA256 hash for verification |
-| `size_bytes` | int | ✓ | File size in bytes |
-| `estimated_memory` | int | | RAM requirement estimate |
-| `description` | string | | Model description |
-| `tags` | array | | Searchable tags |
-| `prompt_template` | object | | Chat format template |
+| id | string | Yes | Unique identifier |
+| display_name | string | No | Human-readable name |
+| backend | string | No | Backend type (always llama.cpp) |
+| context_length | int | No | Max context window size |
+| recommended_threads | int | No | Suggested CPU thread count |
+| quantization | string | No | Quantization method (Q4_K_M, etc.) |
+| file_path_in_pck | string | Yes | Path in Godot project |
+| sha256 | string | No | SHA256 hash for verification |
+| size_bytes | int | Yes | File size in bytes |
+| estimated_memory | int | No | RAM requirement estimate |
+| description | string | No | Model description |
+| tags | array | No | Searchable tags |
+| prompt_template | object | No | Chat format template |
 
 ## Building from Source
 
@@ -248,14 +276,14 @@ chmod +x build_llm_linux.sh
 
 ### Build Output
 
-The build produces platform-specific binaries in `addons/local_llm/bin/`:
+The build produces platform-specific binaries in addons/local_llm/bin/:
 
 ```
 bin/
-├── liblocal_llm.windows.editor.x86_64.dll
-├── liblocal_llm.windows.template_release.x86_64.dll
-├── liblocal_llm.linux.editor.x86_64.so
-└── liblocal_llm.linux.template_release.x86_64.so
+    liblocal_llm.windows.editor.x86_64.dll
+    liblocal_llm.windows.template_release.x86_64.dll
+    liblocal_llm.linux.editor.x86_64.so
+    liblocal_llm.linux.template_release.x86_64.so
 ```
 
 ## Packaging for Distribution
@@ -264,11 +292,11 @@ bin/
 
 GGUF files are large (8+ GB for 14B Q4 models). Options:
 
-1. **Include in PCK** - Works for smaller models (<2GB)
+1. **Include in PCK** - Works for smaller models (less than 2GB)
 2. **External file** - Ship model alongside executable
 3. **First-run extraction** - Extract from PCK to user directory
 
-The current implementation uses option 3: models are embedded in the PCK but extracted to `user://models_cache/` on first load because llama.cpp requires filesystem paths.
+The current implementation uses option 3: models are embedded in the PCK but extracted to user://models_cache/ on first load because llama.cpp requires filesystem paths.
 
 ### Creating a Release Build
 
@@ -279,15 +307,16 @@ cd scripts
 ```
 
 This creates:
+
 ```
 dist/
-└── windows/
-    ├── PlayerCreatedWorld.exe
-    ├── PlayerCreatedWorld.pck
-    ├── liblocal_llm.windows.template_release.x86_64.dll
-    └── models/
-        ├── models.json
-        └── qwen2.5-coder-14b-q4_k_m.gguf
+    windows/
+        PlayerCreatedWorld.exe
+        PlayerCreatedWorld.pck
+        liblocal_llm.windows.template_release.x86_64.dll
+        models/
+            models.json
+            qwen2.5-coder-14b-q4_k_m.gguf
 ```
 
 ## Performance Tuning
@@ -302,11 +331,11 @@ LocalLLMService.get_settings().n_threads = 0
 LocalLLMService.get_settings().n_threads = 8
 ```
 
-Recommended: `min(physical_cores, 8)`. More threads have diminishing returns.
+Recommended: min(physical_cores, 8). More threads have diminishing returns.
 
 ### Context Length
 
-Larger contexts use more memory. Default is model's max, but can be reduced:
+Larger contexts use more memory. Default is model max, but can be reduced:
 
 ```gdscript
 LocalLLMService.get_settings().context_length = 4096  # Reduce from 32K
@@ -409,22 +438,22 @@ signal cancelled()
 
 ## Troubleshooting
 
-### "Extension not loaded"
+### Extension not loaded
 
-- Ensure `.dll`/`.so` files are in `addons/local_llm/bin/`
+- Ensure .dll/.so files are in addons/local_llm/bin/
 - Check Godot console for loading errors
-- Verify `local_llm.gdextension` paths match actual files
+- Verify local_llm.gdextension paths match actual files
 
-### "Model file not found"
+### Model file not found
 
-- Verify `file_path_in_pck` in `models.json` matches actual file location
+- Verify file_path_in_pck in models.json matches actual file location
 - Check if model was properly included in export
 
-### "Failed to load model" / Out of Memory
+### Failed to load model / Out of Memory
 
-- Check available RAM against `estimated_memory` in `models.json`
+- Check available RAM against estimated_memory in models.json
 - Try a smaller quantization (Q4 vs Q8)
-- Reduce `context_length` in settings
+- Reduce context_length in settings
 
 ### Slow Generation
 
@@ -435,7 +464,16 @@ signal cancelled()
 ### Hash Mismatch
 
 - Model file may be corrupted during download
-- Re-download and update `sha256` in `models.json`
+- Re-download and update sha256 in models.json
+
+## Current Models
+
+The project ships with Qwen 2.5 Coder 14B configurations:
+
+| Model ID | Quantization | Size | Context | Description |
+|----------|--------------|------|---------|-------------|
+| qwen2.5-coder-14b-q4_k_m | Q4_K_M | 8.7 GB | 32K | Default, balanced quality/speed |
+| qwen2.5-coder-14b-q5_k_m | Q5_K_M | 10.4 GB | 32K | Higher quality, more memory |
 
 ## License
 
@@ -445,6 +483,6 @@ signal cancelled()
 
 ## Credits
 
-- [llama.cpp](https://github.com/ggerganov/llama.cpp) - Georgi Gerganov
-- [Qwen2.5-Coder](https://github.com/QwenLM/Qwen2.5-Coder) - Alibaba Cloud
-- [godot-cpp](https://github.com/godotengine/godot-cpp) - Godot Engine contributors
+- llama.cpp: https://github.com/ggerganov/llama.cpp by Georgi Gerganov
+- Qwen2.5-Coder: https://github.com/QwenLM/Qwen2.5-Coder by Alibaba Cloud
+- godot-cpp: https://github.com/godotengine/godot-cpp by Godot Engine contributors

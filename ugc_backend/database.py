@@ -1,11 +1,14 @@
 """
 Database module for spell package system.
 Uses SQLite for metadata storage.
+
+Supports multi-world architecture where a single server can host multiple worlds.
 """
 
 import sqlite3
 import json
 import os
+import uuid
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
@@ -40,7 +43,33 @@ def init_database():
     with get_connection() as conn:
         cursor = conn.cursor()
         
+        # Worlds table - tracks individual world instances hosted by this server
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS worlds (
+                world_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                created_by TEXT,
+                player_count INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        
+        # World ops table - world-specific operations log
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS world_ops (
+                op_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                world_id TEXT NOT NULL,
+                op_type TEXT NOT NULL,
+                op_data TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (world_id) REFERENCES worlds(world_id) ON DELETE CASCADE
+            )
+        """)
+        
         # Spells table - tracks spell identity and active revisions per channel
+        # Spells are global (shared across all worlds)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS spells (
                 spell_id TEXT PRIMARY KEY,
@@ -86,6 +115,14 @@ def init_database():
         """)
         
         # Create indexes
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_worlds_name 
+            ON worlds(name)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_world_ops_world_id 
+            ON world_ops(world_id)
+        """)
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_revisions_spell_id 
             ON revisions(spell_id)
@@ -333,6 +370,117 @@ def get_spell_jobs(spell_id: str, limit: int = 10) -> List[Dict[str, Any]]:
             LIMIT ?
         """, (spell_id, limit))
         return [dict(row) for row in cursor.fetchall()]
+
+
+# ============================================================================
+# World CRUD
+# ============================================================================
+
+def create_world(name: str, description: str = None, created_by: str = None) -> Dict[str, Any]:
+    """Create a new world."""
+    world_id = f"world_{uuid.uuid4().hex[:8]}"
+    now = datetime.utcnow().isoformat()
+    
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO worlds (world_id, name, description, created_by, player_count, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 0, ?, ?)
+        """, (world_id, name, description, created_by, now, now))
+    
+    return get_world(world_id)
+
+
+def get_world(world_id: str) -> Optional[Dict[str, Any]]:
+    """Get a world by ID."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM worlds WHERE world_id = ?", (world_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def get_all_worlds() -> List[Dict[str, Any]]:
+    """Get all worlds."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM worlds ORDER BY created_at DESC")
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def update_world_player_count(world_id: str, delta: int) -> bool:
+    """Update world player count by delta."""
+    now = datetime.utcnow().isoformat()
+    
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE worlds 
+            SET player_count = MAX(0, player_count + ?), updated_at = ?
+            WHERE world_id = ?
+        """, (delta, now, world_id))
+        return cursor.rowcount > 0
+
+
+def delete_world(world_id: str) -> bool:
+    """Delete a world and its ops."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        # Delete ops first (cascade should handle but explicit is better)
+        cursor.execute("DELETE FROM world_ops WHERE world_id = ?", (world_id,))
+        cursor.execute("DELETE FROM worlds WHERE world_id = ?", (world_id,))
+        return cursor.rowcount > 0
+
+
+def world_exists(world_id: str) -> bool:
+    """Check if a world exists."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM worlds WHERE world_id = ?", (world_id,))
+        return cursor.fetchone() is not None
+
+
+# ============================================================================
+# World Ops CRUD
+# ============================================================================
+
+def add_world_op(world_id: str, op_type: str, op_data: Dict[str, Any]) -> int:
+    """Add an operation to a world."""
+    now = datetime.utcnow().isoformat()
+    op_json = json.dumps(op_data)
+    
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO world_ops (world_id, op_type, op_data, created_at)
+            VALUES (?, ?, ?, ?)
+        """, (world_id, op_type, op_json, now))
+        return cursor.lastrowid
+
+
+def get_world_ops(world_id: str) -> List[Dict[str, Any]]:
+    """Get all operations for a world."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM world_ops 
+            WHERE world_id = ? 
+            ORDER BY op_id ASC
+        """, (world_id,))
+        results = []
+        for row in cursor.fetchall():
+            result = dict(row)
+            result["op_data"] = json.loads(result["op_data"])
+            results.append(result)
+        return results
+
+
+def clear_world_ops(world_id: str) -> int:
+    """Clear all operations for a world. Returns count of deleted ops."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM world_ops WHERE world_id = ?", (world_id,))
+        return cursor.rowcount
 
 
 # Initialize on import

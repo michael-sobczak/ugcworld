@@ -1,10 +1,11 @@
 extends Node
 
 ## Client controller for terraforming and spell casting demo.
-## Connects to the Python backend server.
+## Connects to the Python backend server and manages world selection.
 ##
 ## Controls:
 ## - C or Enter: Open connection dialog (choose localhost/production/custom)
+## - W: Open world selection dialog (when connected but not in a world)
 ## - 1: Cast create_land spell (legacy voxel op)
 ## - 2: Cast dig spell (legacy voxel op)
 ## - 3: Cast demo_spark spell (new spell system)
@@ -29,7 +30,10 @@ extends Node
 ## Server settings
 @export var server_host: String = "127.0.0.1"
 @export var server_port: int = 5000
-@export var auto_connect: bool = false  # Disabled - use dialog instead
+@export var auto_connect: bool = false  # Manual auto-connect (for testing)
+
+## Production server URL (used in release builds)
+const PRODUCTION_URL := "wss://ugc-world-backend.fly.dev"
 
 ## References
 var camera: Camera3D = null
@@ -39,6 +43,7 @@ var spell_net: Node = null
 var spell_cast: Node = null
 var spell_registry: Node = null
 var connection_dialog: Node = null
+var world_selection_dialog: Node = null
 
 ## State
 var _mouse_captured: bool = false
@@ -67,11 +72,18 @@ func _ready() -> void:
 	if connection_dialog:
 		connection_dialog.connection_requested.connect(_on_connection_url_requested)
 	
+	# Find world selection dialog in scene
+	world_selection_dialog = get_node_or_null("../WorldSelectionDialog")
+	if world_selection_dialog:
+		world_selection_dialog.world_selected.connect(_on_world_selected)
+	
 	# Connect to network signals
 	if net_node:
 		net_node.connected_to_server.connect(_on_connected)
 		net_node.disconnected_from_server.connect(_on_disconnected)
 		net_node.connection_failed.connect(_on_connection_failed)
+		net_node.world_joined.connect(_on_world_joined)
+		net_node.world_left.connect(_on_world_left)
 	
 	# Connect to world signals
 	if world_node:
@@ -90,8 +102,13 @@ func _ready() -> void:
 		spell_cast.spell_cast_complete.connect(_on_spell_cast_complete)
 		spell_cast.spell_cast_failed.connect(_on_spell_cast_failed)
 	
-	# Auto-connect to server (if enabled, will use default localhost)
-	if auto_connect:
+	# Auto-connect behavior:
+	# - In release builds (standalone), always auto-connect to production
+	# - In editor, use manual dialog unless auto_connect is enabled
+	if _is_release_build():
+		print("[Client] Release build detected - connecting to production server...")
+		call_deferred("_connect_to_production")
+	elif auto_connect:
 		call_deferred("_connect_to_server")
 	else:
 		print("[Client] Press C to open connection dialog")
@@ -104,6 +121,20 @@ func _connect_to_server() -> void:
 		net_node.connect_to_server(server_host, server_port)
 
 
+func _connect_to_production() -> void:
+	"""Connect to the production server - used in release builds."""
+	if net_node:
+		print("[Client] Connecting to production at %s..." % PRODUCTION_URL)
+		net_node.connect_to_url(PRODUCTION_URL)
+
+
+func _is_release_build() -> bool:
+	"""Check if this is a release/exported build (not running in editor)."""
+	# OS.has_feature("standalone") is true for exported builds
+	# OS.has_feature("editor") is true when running in the Godot editor
+	return OS.has_feature("standalone") and not OS.has_feature("editor")
+
+
 func _show_connection_dialog() -> void:
 	"""Show the connection dialog for server selection."""
 	if connection_dialog:
@@ -112,6 +143,14 @@ func _show_connection_dialog() -> void:
 		# Fallback to direct localhost connection if no dialog
 		print("[Client] No connection dialog found, using localhost")
 		_connect_to_server()
+
+
+func _show_world_selection_dialog() -> void:
+	"""Show the world selection dialog."""
+	if world_selection_dialog:
+		world_selection_dialog.show_dialog()
+	else:
+		print("[Client] No world selection dialog found")
 
 
 func _on_connection_url_requested(url: String) -> void:
@@ -123,11 +162,13 @@ func _on_connection_url_requested(url: String) -> void:
 
 func _on_connected() -> void:
 	print("[Client] Connected to backend!")
-	print("[Client] Press 5/6 to build demo spells, 7/8 to publish, 3/4 to cast")
 	
-	# Notify dialog of success
+	# Notify connection dialog of success (quick hide)
 	if connection_dialog:
-		connection_dialog.show_success("Connected!")
+		connection_dialog.show_success("Connected!", true)
+	
+	# Show world selection dialog
+	call_deferred("_show_world_selection_dialog")
 
 
 func _on_disconnected() -> void:
@@ -141,6 +182,22 @@ func _on_connection_failed() -> void:
 	# Notify dialog of failure
 	if connection_dialog:
 		connection_dialog.show_error("Connection failed. Is the server running?")
+
+
+func _on_world_selected(world_id: String) -> void:
+	print("[Client] World selected: ", world_id)
+
+
+func _on_world_joined(world_id: String, world: Dictionary) -> void:
+	var world_name: String = world.get("name", "Unknown")
+	print("[Client] Joined world: %s (%s)" % [world_name, world_id])
+	print("[Client] Press 5/6 to build demo spells, 7/8 to publish, 3/4 to cast")
+
+
+func _on_world_left(world_id: String) -> void:
+	print("[Client] Left world: ", world_id)
+	# Show world selection dialog again
+	call_deferred("_show_world_selection_dialog")
 
 
 func _on_sync_complete() -> void:
@@ -202,7 +259,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
 			KEY_C, KEY_ENTER:
-				_show_connection_dialog()
+				if net_node and net_node.is_connected_to_server():
+					# Already connected - show world selection
+					_show_world_selection_dialog()
+				else:
+					# Not connected - show connection dialog
+					_show_connection_dialog()
 			KEY_1:
 				_cast_create_land()
 			KEY_2:
@@ -311,6 +373,10 @@ func _cast_create_land() -> void:
 		print("[Client] Not connected. Press C to connect.")
 		return
 	
+	if not net_node.is_in_world():
+		print("[Client] Not in a world. Press C to select a world.")
+		return
+	
 	var target := _get_cast_target()
 	
 	var spell := {
@@ -330,6 +396,10 @@ func _cast_dig() -> void:
 	
 	if net_node == null or not net_node.is_connected_to_server():
 		print("[Client] Not connected. Press C to connect.")
+		return
+	
+	if not net_node.is_in_world():
+		print("[Client] Not in a world. Press C to select a world.")
 		return
 	
 	var target := _get_cast_target()
@@ -356,6 +426,10 @@ func _cast_spell_package(spell_id: String) -> void:
 	
 	if net_node == null or not net_node.is_connected_to_server():
 		print("[Client] Not connected. Press C to connect.")
+		return
+	
+	if not net_node.is_in_world():
+		print("[Client] Not in a world. Press C to select a world.")
 		return
 	
 	var target := _get_cast_target()

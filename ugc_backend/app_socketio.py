@@ -23,10 +23,15 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 # Local imports
 from database import (
     init_database,
+    # Spell functions
     create_spell, get_spell, get_all_spells, spell_exists,
     update_spell_active_revision, get_spell_revisions,
     create_job, get_job, update_job,
-    get_revision
+    get_revision,
+    # World functions
+    create_world, get_world, get_all_worlds, world_exists,
+    update_world_player_count, delete_world,
+    add_world_op, get_world_ops, clear_world_ops
 )
 from spell_storage import (
     read_revision_file, read_manifest, revision_exists,
@@ -56,7 +61,7 @@ socketio = SocketIO(
 
 # Server state
 connected_clients: Set[str] = set()
-op_log: list[dict] = []  # Legacy world ops
+client_worlds: Dict[str, str] = {}  # client_id -> world_id mapping
 
 
 # ============================================================================
@@ -94,24 +99,169 @@ def handle_connect():
     logger.info(f"Client connected: {client_id}. Total: {len(connected_clients)}")
     
     # Send connection acknowledgment
+    # Client should then request world list and join a world
     emit('connected', {
         'client_id': client_id,
         'server_time': datetime.utcnow().isoformat()
     })
-    
-    # Send initial sync for legacy world ops
-    if op_log:
-        emit('sync_ops', {'ops': op_log})
-    else:
-        emit('sync_complete', {'message': 'World is empty'})
 
 
 @socketio.on('disconnect')
 def handle_disconnect():
     """Handle client disconnection."""
     client_id = request.sid
+    
+    # Leave current world if in one
+    world_id = client_worlds.pop(client_id, None)
+    if world_id:
+        leave_room(world_id)
+        update_world_player_count(world_id, -1)
+        logger.info(f"Client {client_id} left world {world_id}")
+    
     connected_clients.discard(client_id)
     logger.info(f"Client disconnected: {client_id}. Total: {len(connected_clients)}")
+
+
+# ============================================================================
+# World Management Events
+# ============================================================================
+
+@socketio.on('world.list')
+def handle_list_worlds(data: Dict[str, Any] = None):
+    """
+    List all available worlds.
+    
+    Output: { worlds: [...] }
+    """
+    worlds = get_all_worlds()
+    emit('world.list_result', {'worlds': worlds})
+
+
+@socketio.on('world.create')
+def handle_create_world(data: Dict[str, Any]):
+    """
+    Create a new world.
+    
+    Input: { name: string, description?: string }
+    Output: { world: {...} }
+    """
+    name = data.get('name', '').strip()
+    description = data.get('description', '')
+    
+    if not name:
+        emit('error', {'message': 'World name is required'})
+        return
+    
+    if len(name) > 50:
+        emit('error', {'message': 'World name must be 50 characters or less'})
+        return
+    
+    client_id = request.sid
+    world = create_world(name, description, client_id)
+    
+    logger.info(f"World created: {world['world_id']} '{name}' by {client_id}")
+    
+    emit('world.created', {'world': world})
+    
+    # Broadcast updated world list to all clients
+    socketio.emit('world.list_updated', {'worlds': get_all_worlds()})
+
+
+@socketio.on('world.join')
+def handle_join_world(data: Dict[str, Any]):
+    """
+    Join a world.
+    
+    Input: { world_id: string }
+    Output: { world_id: string, world: {...} } then sync_ops or sync_complete
+    """
+    world_id = data.get('world_id')
+    client_id = request.sid
+    
+    if not world_id:
+        emit('error', {'message': 'world_id is required'})
+        return
+    
+    # Check world exists
+    world = get_world(world_id)
+    if not world:
+        emit('error', {'message': f'World {world_id} not found'})
+        return
+    
+    # Leave current world if in one
+    current_world = client_worlds.get(client_id)
+    if current_world:
+        leave_room(current_world)
+        update_world_player_count(current_world, -1)
+        logger.info(f"Client {client_id} left world {current_world}")
+    
+    # Join the new world
+    join_room(world_id)
+    client_worlds[client_id] = world_id
+    update_world_player_count(world_id, 1)
+    
+    logger.info(f"Client {client_id} joined world {world_id}")
+    
+    # Send join confirmation
+    world = get_world(world_id)  # Re-fetch to get updated player count
+    emit('world.joined', {
+        'world_id': world_id,
+        'world': world
+    })
+    
+    # Send world ops for sync
+    ops = get_world_ops(world_id)
+    if ops:
+        # Convert to op format expected by client
+        op_list = []
+        for op_record in ops:
+            op_data = op_record['op_data']
+            op_data['op'] = op_record['op_type']
+            op_list.append(op_data)
+        emit('sync_ops', {'ops': op_list})
+    else:
+        emit('sync_complete', {'message': 'World is empty'})
+
+
+@socketio.on('world.leave')
+def handle_leave_world(data: Dict[str, Any] = None):
+    """
+    Leave the current world.
+    
+    Output: { left_world_id: string }
+    """
+    client_id = request.sid
+    world_id = client_worlds.pop(client_id, None)
+    
+    if world_id:
+        leave_room(world_id)
+        update_world_player_count(world_id, -1)
+        logger.info(f"Client {client_id} left world {world_id}")
+        emit('world.left', {'left_world_id': world_id})
+    else:
+        emit('world.left', {'left_world_id': None})
+
+
+@socketio.on('world.get')
+def handle_get_world(data: Dict[str, Any]):
+    """
+    Get details of a specific world.
+    
+    Input: { world_id: string }
+    Output: { world: {...} }
+    """
+    world_id = data.get('world_id')
+    
+    if not world_id:
+        emit('error', {'message': 'world_id is required'})
+        return
+    
+    world = get_world(world_id)
+    if not world:
+        emit('error', {'message': f'World {world_id} not found'})
+        return
+    
+    emit('world.info', {'world': world})
 
 
 # ============================================================================
@@ -374,15 +524,25 @@ def handle_list_files(data: Dict[str, Any]):
 def handle_cast_request(data: Dict[str, Any]):
     """
     Handle a spell cast request from a client.
-    Server validates and broadcasts to all clients.
+    Server validates and broadcasts to all clients in the world.
     
     Input: {
         spell_id: string,
         revision_id: string,
         cast_params: { target_position: {x,y,z}, ... }
     }
-    Output: broadcasts spell.cast_event to all clients
+    Output: broadcasts spell.cast_event to all clients in the same world
     """
+    client_id = request.sid
+    world_id = client_worlds.get(client_id)
+    
+    if not world_id:
+        emit('spell.cast_rejected', {
+            'spell_id': data.get('spell_id', ''),
+            'error': 'Must join a world first'
+        })
+        return
+    
     spell_id = data.get('spell_id')
     revision_id = data.get('revision_id')
     cast_params = data.get('cast_params', {})
@@ -415,19 +575,18 @@ def handle_cast_request(data: Dict[str, Any]):
     import random
     cast_seed = random.randint(0, 2**31 - 1)
     
-    caster_id = request.sid
+    logger.info(f"Cast: {spell_id} rev {revision_id} by {client_id} in world {world_id}")
     
-    logger.info(f"Cast: {spell_id} rev {revision_id} by {caster_id}")
-    
-    # Broadcast cast event to all clients (including sender)
+    # Broadcast cast event to all clients in the world
     socketio.emit('spell.cast_event', {
         'spell_id': spell_id,
         'revision_id': revision_id,
-        'caster_id': caster_id,
+        'caster_id': client_id,
+        'world_id': world_id,
         'cast_params': cast_params,
         'seed': cast_seed,
         'timestamp': datetime.utcnow().isoformat()
-    })
+    }, room=world_id)
 
 
 # ============================================================================
@@ -437,6 +596,13 @@ def handle_cast_request(data: Dict[str, Any]):
 @socketio.on('request_spell')
 def handle_legacy_spell(data: Dict[str, Any]):
     """Handle legacy spell requests (create_land, dig)."""
+    client_id = request.sid
+    world_id = client_worlds.get(client_id)
+    
+    if not world_id:
+        emit('spell_rejected', {'error': 'Must join a world first'})
+        return
+    
     spell = data.get('spell', {})
     spell_type = spell.get('type', '')
     
@@ -460,28 +626,48 @@ def handle_legacy_spell(data: Dict[str, Any]):
             'radius': float(spell.get('radius', 6.0))
         })
     
-    # Apply and broadcast
+    # Apply and broadcast to world room
     for op in ops:
-        op_log.append(op)
-        logger.info(f"Broadcasting op: {op['op']} at {op.get('center', 'unknown')}")
-        socketio.emit('apply_op', {'op': op})
+        # Store in database
+        add_world_op(world_id, op['op'], {
+            'center': op.get('center'),
+            'radius': op.get('radius'),
+            'material_id': op.get('material_id')
+        })
+        logger.info(f"Broadcasting op to world {world_id}: {op['op']} at {op.get('center', 'unknown')}")
+        socketio.emit('apply_op', {'op': op}, room=world_id)
 
 
 @socketio.on('ping')
 def handle_ping(data: Dict[str, Any] = None):
     """Handle ping request."""
+    client_id = request.sid
+    world_id = client_worlds.get(client_id)
+    
+    world_ops_count = 0
+    if world_id:
+        world_ops_count = len(get_world_ops(world_id))
+    
     emit('pong', {
         'clients': len(connected_clients),
-        'ops': len(op_log)
+        'world_id': world_id,
+        'ops': world_ops_count
     })
 
 
 @socketio.on('clear_world')
 def handle_clear_world(data: Dict[str, Any] = None):
     """Handle world clear request."""
-    op_log.clear()
-    logger.info("World cleared")
-    socketio.emit('world_cleared', {})
+    client_id = request.sid
+    world_id = client_worlds.get(client_id)
+    
+    if not world_id:
+        emit('error', {'message': 'Must join a world first'})
+        return
+    
+    cleared_count = clear_world_ops(world_id)
+    logger.info(f"World {world_id} cleared ({cleared_count} ops)")
+    socketio.emit('world_cleared', {'world_id': world_id}, room=world_id)
 
 
 # ============================================================================

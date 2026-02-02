@@ -1,0 +1,92 @@
+[gd_scene load_steps=2 format=3 uid="uid://world_sel_dialog_001"]
+
+[ext_resource type="Script" path="res://client/scripts/WorldSelectionDialog.gd" id="1_script"]
+
+[node name="WorldSelectionDialog" type="CanvasLayer"]
+script = ExtResource("1_script")
+
+[node name="Panel" type="PanelContainer" parent="."]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -220.0
+offset_top = -200.0
+offset_right = 220.0
+offset_bottom = 200.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="Panel"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "🌍 Select World"
+horizontal_alignment = 1
+
+[node name="Separator1" type="HSeparator" parent="Panel/VBox"]
+layout_mode = 2
+
+[node name="WorldListLabel" type="Label" parent="Panel/VBox"]
+layout_mode = 2
+text = "Available Worlds:"
+
+[node name="WorldListContainer" type="HBoxContainer" parent="Panel/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="WorldList" type="ItemList" parent="Panel/VBox/WorldListContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="RefreshBtn" type="Button" parent="Panel/VBox/WorldListContainer"]
+layout_mode = 2
+size_flags_vertical = 0
+text = "↻"
+tooltip_text = "Refresh world list"
+
+[node name="JoinBtn" type="Button" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+disabled = true
+text = "Join Selected World"
+
+[node name="Separator2" type="HSeparator" parent="Panel/VBox"]
+layout_mode = 2
+
+[node name="CreateLabel" type="Label" parent="Panel/VBox"]
+layout_mode = 2
+text = "Create New World:"
+
+[node name="CreateContainer" type="HBoxContainer" parent="Panel/VBox"]
+layout_mode = 2
+
+[node name="WorldNameInput" type="LineEdit" parent="Panel/VBox/CreateContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Enter world name..."
+max_length = 50
+
+[node name="CreateBtn" type="Button" parent="Panel/VBox/CreateContainer"]
+layout_mode = 2
+disabled = true
+text = "Create"
+
+[node name="Separator3" type="HSeparator" parent="Panel/VBox"]
+layout_mode = 2
+
+[node name="StatusLabel" type="Label" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+text = "Select a world or create a new one"
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="CancelBtn" type="Button" parent="Panel/VBox"]
+layout_mode = 2
+text = "Cancel"

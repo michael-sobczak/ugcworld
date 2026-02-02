@@ -87,12 +87,13 @@ func show_error(message: String) -> void:
 	status_label.modulate = Color.RED
 
 
-func show_success(message: String) -> void:
+func show_success(message: String, auto_hide: bool = true) -> void:
 	status_label.text = message
 	status_label.modulate = Color.LIME
-	# Auto-hide after success
-	await get_tree().create_timer(1.0).timeout
-	hide_dialog()
+	# Auto-hide after success if requested
+	if auto_hide:
+		await get_tree().create_timer(0.5).timeout
+		hide_dialog()
 
 
 func _unhandled_input(event: InputEvent) -> void:

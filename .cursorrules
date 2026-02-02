@@ -1,0 +1,243 @@
+# UGC World Development Guidelines
+
+This is a multiplayer voxel game with player-created spells, powered by local LLM inference.
+
+## Project Structure
+
+```
+ugcworld/
+  docs/                    # Shared design specifications
+  scripts/                 # Build and management scripts
+  ugc_backend/             # Python Flask + Socket.IO server
+  player-created-world/    # Godot 4.6 game client
+    addons/
+      local_llm/           # LLM GDExtension (llama.cpp wrapper)
+      zylann.voxel/        # Voxel terrain addon
+    client/                # Client-specific scenes and scripts
+    shared/scripts/        # Shared autoloads and systems
+      net/                 # WebSocket networking
+      world/               # World state and voxel backend
+      spells/              # Spell package system
+    models/                # LLM model files and registry
+    docs/                  # Game-specific documentation
+```
+
+## Key Documentation
+
+ALWAYS read these before making changes:
+
+- `player-created-world/docs/ARCHITECTURE.md` - System overview and data flow
+- `player-created-world/docs/SPELLS.md` - Spell package system and hot-loading
+- `player-created-world/docs/VOXELS.md` - Voxel terrain integration
+- `player-created-world/docs/LOCAL_LLM.md` - Local LLM inference system
+- `ugc_backend/README.md` - Backend API and Socket.IO events
+- `docs/SpellCost.md` - Mana/cost system specification (design doc)
+
+## Development Rules
+
+### Documentation First
+
+1. **Before making changes**: Read the relevant documentation to understand the current architecture
+2. **After making changes**: Update documentation to reflect any architectural changes
+3. **When adding features**: Document the feature in the appropriate markdown file
+4. **When changing APIs**: Update the relevant README with new events/endpoints
+
+### Production and Localhost Compatibility
+
+All server/client code MUST work in both contexts:
+
+**Backend (Python)**:
+- Use environment variables for configuration: `HOST`, `PORT`, `SECRET_KEY`
+- Never hardcode `localhost` or `127.0.0.1` in production code paths
+- The server runs on `0.0.0.0` to accept connections from any interface
+- Production URL: `wss://ugc-world-backend.fly.dev`
+- Localhost URL: `ws://127.0.0.1:5000`
+
+**Client (Godot)**:
+- Support both `ws://` (localhost) and `wss://` (production) protocols
+- Use the connection dialog for URL selection in editor/dev builds
+- Auto-connect to production in release builds (`OS.has_feature("standalone")`)
+- Never assume a specific server URL in game code
+
+**Example pattern from Net.gd**:
+```gdscript
+const LOCALHOST_URL := "ws://127.0.0.1:5000"
+const PRODUCTION_URL := "wss://ugc-world-backend.fly.dev"
+
+func _is_release_build() -> bool:
+    return OS.has_feature("standalone") and not OS.has_feature("editor")
+```
+
+### Server-Authoritative Architecture
+
+This is a server-authoritative multiplayer game:
+
+1. **Clients send intent, not state** - Spell requests, not spell results
+2. **Server validates and broadcasts** - All ops go through the Python backend
+3. **Deterministic execution** - Use synced seeds for random behavior
+4. **Late-join sync** - New clients receive full state via `sync_ops`
+
+### Godot Autoloads
+
+These singletons are always available (defined in project.godot):
+
+- `Net` - WebSocket client connection
+- `World` - Op handling and legacy spell requests
+- `SpellCache` - Local spell package caching
+- `SpellLoader` - Hot-loading scripts and assets
+- `SpellRegistry` - Active revision tracking
+- `SpellNet` - Spell network communication
+- `SpellCastController` - Cast execution management
+- `LocalLLMService` - LLM inference (optional)
+
+### Socket.IO Event Conventions
+
+**Naming**: Use dot-notation namespaces
+- `spell.create_draft`, `spell.start_build`, `spell.cast_request`
+- `content.get_manifest`, `content.get_file`
+- `job.progress`
+
+**Request/Response**: Events are not request-response; use separate event names
+- Client sends: `spell.start_build`
+- Server responds: `spell.build_started`
+
+**Broadcast**: Server broadcasts to all clients for shared state
+- `spell.cast_event`, `spell.active_update`, `apply_op`
+
+### GDScript Style
+
+- Use static typing: `var name: String = ""`
+- Use explicit null checks: `if node != null:`
+- Prefer signals over direct method calls for decoupling
+- Document autoload dependencies in script header comments
+
+### Python Style
+
+- Use type hints: `def function(param: str) -> Dict[str, Any]:`
+- Use context managers for database connections
+- Log important events with the logging module
+- Handle errors gracefully with appropriate Socket.IO error events
+
+## Testing Checklist
+
+Before committing changes:
+
+1. **Localhost test**: Run `python app_socketio.py` and connect from Godot editor
+2. **Multi-client test**: Open two Godot instances, both connect to same server
+3. **Build test**: Export the game and verify production connection works
+4. **Documentation check**: Ensure docs reflect any changes made
+
+## Common Tasks
+
+### Adding a New Socket.IO Event
+
+1. Add handler in `ugc_backend/app_socketio.py`:
+   ```python
+   @socketio.on('your.event')
+   def handle_your_event(data: Dict[str, Any]):
+       # Handle event
+       emit('your.event_result', {...})
+   ```
+
+2. Add client handling in `SpellNet.gd`:
+   ```gdscript
+   func _on_message_received(data: Dictionary) -> void:
+       match msg_type:
+           "your.event_result":
+               _handle_your_event(data)
+   ```
+
+3. Document in `ugc_backend/README.md` event tables
+
+### Adding a New Spell
+
+Use the in-game build system or manually:
+
+1. Create directory: `ugc_backend/data/spells/SPELL_ID/revisions/rev_000001/`
+2. Add `code/spell.gd` extending `SpellModule`
+3. Add `manifest.json` with required fields
+4. Register in database and set active revision
+
+See `player-created-world/docs/SPELLS.md` for full details.
+
+### Adding a New LLM Model
+
+1. Place `.gguf` file in `player-created-world/models/`
+2. Add entry to `models/models.json` with required fields
+3. Compute SHA256 hash for verification
+
+See `player-created-world/docs/LOCAL_LLM.md` for full details.
+
+### Building the LLM GDExtension
+
+Windows:
+```powershell
+cd scripts
+.\build_llm_win.ps1 -Target release
+```
+
+Linux:
+```bash
+cd scripts
+./build_llm_linux.sh
+```
+
+## Deployment
+
+### Backend to Fly.io
+
+```bash
+cd ugc_backend
+fly deploy
+```
+
+Configuration in `fly.toml`:
+- Persistent volume at `/app/data` for SQLite and spell storage
+- WebSocket support via HTTP service
+- Health check at `/healthz`
+
+### Game Client
+
+```powershell
+cd scripts
+.\package_game.ps1 -Platform windows
+```
+
+## File Naming Conventions
+
+- GDScript: `PascalCase.gd` for classes, `snake_case.gd` for scripts
+- Python: `snake_case.py`
+- Documentation: `UPPERCASE.md` for main docs, `lowercase.md` for supplementary
+- Spell IDs: `snake_case` (e.g., `demo_spark`, `fireball`)
+- Revision IDs: `rev_NNNNNN_HASH` (e.g., `rev_000001_a3b4c5d6`)
+
+## Important Constants
+
+### Network
+- Default port: `5000`
+- Production backend: `wss://ugc-world-backend.fly.dev`
+- Localhost backend: `ws://127.0.0.1:5000`
+
+### Spell Channels
+- `draft` - Work in progress
+- `beta` - Testing
+- `stable` - Production ready
+
+### Build Job Stages
+- `prepare` (0-15%)
+- `assemble_package` (20-55%)
+- `validate` (60-75%)
+- `finalize` (80-95%)
+- `done` (100%)
+
+## Gotchas
+
+1. **Hot-loading scripts**: Godot's `load()` doesn't work on `user://` paths in exports. Use `GDScript.new()` with `source_code` property instead.
+
+2. **WebSocket vs Socket.IO**: The Python server uses Flask-SocketIO which has its own protocol. The Godot client currently uses plain WebSocket - ensure message format compatibility.
+
+3. **Model extraction**: GGUF models must be extracted to filesystem paths for llama.cpp. They're stored in `user://models_cache/` at runtime.
+
+4. **Voxel Tools addon**: Must match Godot version exactly. If unavailable, VoxelBackend uses CSG fallback.
+
+5. **Vector3 serialization**: Convert to `{x, y, z}` dict for JSON, back to Vector3 on receive.

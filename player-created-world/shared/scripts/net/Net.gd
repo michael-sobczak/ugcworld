@@ -2,6 +2,7 @@ extends Node
 
 ## WebSocket client for connecting to the Python backend.
 ## This is a client-only implementation - no server hosting capability.
+## Supports multi-world architecture where a server can host multiple worlds.
 
 const DEFAULT_HOST := "127.0.0.1"
 const DEFAULT_PORT := 5000
@@ -13,12 +14,25 @@ signal disconnected_from_server
 signal connection_failed
 signal message_received(data: Dictionary)
 
+# World management signals
+signal world_list_received(worlds: Array)
+signal world_created(world: Dictionary)
+signal world_joined(world_id: String, world: Dictionary)
+signal world_left(world_id: String)
+signal world_list_updated(worlds: Array)
+
 var _socket: WebSocketPeer = null
 var _connected := false
 var _connecting := false
 
 ## Server URL
 var server_url: String = ""
+
+## Current world ID (empty if not in a world)
+var current_world_id: String = ""
+
+## Current world info
+var current_world: Dictionary = {}
 
 
 func _ready() -> void:
@@ -104,6 +118,8 @@ func disconnect_from_server() -> void:
 	
 	_connected = false
 	_connecting = false
+	current_world_id = ""
+	current_world = {}
 	set_process(false)
 
 
@@ -127,6 +143,32 @@ func _handle_message(text: String) -> void:
 		return
 	
 	var data: Dictionary = json.data
+	
+	# Handle world management messages internally
+	var msg_type: String = data.get("type", "")
+	match msg_type:
+		"world.list_result":
+			var worlds: Array = data.get("worlds", [])
+			world_list_received.emit(worlds)
+		"world.created":
+			var world: Dictionary = data.get("world", {})
+			world_created.emit(world)
+		"world.joined":
+			current_world_id = data.get("world_id", "")
+			current_world = data.get("world", {})
+			print("[Net] Joined world: ", current_world_id)
+			world_joined.emit(current_world_id, current_world)
+		"world.left":
+			var left_id: String = data.get("left_world_id", "")
+			current_world_id = ""
+			current_world = {}
+			print("[Net] Left world: ", left_id)
+			world_left.emit(left_id)
+		"world.list_updated":
+			var worlds: Array = data.get("worlds", [])
+			world_list_updated.emit(worlds)
+	
+	# Always emit for other handlers
 	message_received.emit(data)
 
 
@@ -136,6 +178,49 @@ func is_connected_to_server() -> bool:
 
 func is_connecting() -> bool:
 	return _connecting
+
+
+func is_in_world() -> bool:
+	return not current_world_id.is_empty()
+
+
+func get_current_world_id() -> String:
+	return current_world_id
+
+
+func get_current_world() -> Dictionary:
+	return current_world
+
+
+# ============================================================================
+# World Management
+# ============================================================================
+
+func request_world_list() -> void:
+	"""Request list of available worlds from server."""
+	send_message({"type": "world.list"})
+
+
+func create_world(world_name: String, description: String = "") -> void:
+	"""Request creation of a new world."""
+	send_message({
+		"type": "world.create",
+		"name": world_name,
+		"description": description
+	})
+
+
+func join_world(world_id: String) -> void:
+	"""Request to join a specific world."""
+	send_message({
+		"type": "world.join",
+		"world_id": world_id
+	})
+
+
+func leave_world() -> void:
+	"""Request to leave current world."""
+	send_message({"type": "world.leave"})
 
 
 func ping() -> void:

@@ -26,10 +26,15 @@ from typing import Dict, Any, Set
 # Local imports
 from database import (
     init_database,
+    # Spell functions
     create_spell, get_spell, get_all_spells, spell_exists,
     update_spell_active_revision, get_spell_revisions,
     create_job, get_job, update_job,
-    get_revision
+    get_revision,
+    # World functions
+    create_world, get_world, get_all_worlds, world_exists,
+    update_world_player_count, delete_world,
+    add_world_op, get_world_ops, clear_world_ops
 )
 from spell_storage import (
     read_revision_file, read_manifest, revision_exists,
@@ -50,7 +55,7 @@ PORT = int(os.environ.get("PORT", "5000"))
 
 # Server state
 connected_clients: Set[websockets.WebSocketServerProtocol] = set()
-op_log: list[dict] = []  # Legacy world ops
+client_worlds: Dict[websockets.WebSocketServerProtocol, str] = {}  # client -> world_id mapping
 
 # Event loop reference for cross-thread communication
 main_loop: asyncio.AbstractEventLoop = None
@@ -99,6 +104,21 @@ async def broadcast(message: dict, exclude: websockets.WebSocketServerProtocol =
     tasks = []
     for client in connected_clients:
         if client != exclude:
+            tasks.append(asyncio.create_task(client.send(msg_str)))
+    
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def broadcast_to_world(world_id: str, message: dict, exclude: websockets.WebSocketServerProtocol = None):
+    """Broadcast a message to all clients in a specific world."""
+    if not connected_clients:
+        return
+    
+    msg_str = json.dumps(message)
+    tasks = []
+    for client in connected_clients:
+        if client != exclude and client_worlds.get(client) == world_id:
             tasks.append(asyncio.create_task(client.send(msg_str)))
     
     if tasks:
@@ -159,6 +179,13 @@ async def handle_message(websocket: websockets.WebSocketServerProtocol, message:
     
     # Route to handler
     handlers = {
+        # World management
+        "world.list": handle_list_worlds,
+        "world.create": handle_create_world,
+        "world.join": handle_join_world,
+        "world.leave": handle_leave_world,
+        "world.get": handle_get_world,
+        
         # Spell management
         "spell.create_draft": handle_create_draft,
         "spell.start_build": handle_start_build,
@@ -183,6 +210,116 @@ async def handle_message(websocket: websockets.WebSocketServerProtocol, message:
         await handler(websocket, data)
     else:
         logger.warning(f"Unknown message type: {msg_type}")
+
+
+# ============================================================================
+# World Management Handlers
+# ============================================================================
+
+async def handle_list_worlds(websocket, data: Dict[str, Any]):
+    """List all available worlds."""
+    worlds = get_all_worlds()
+    await send_to_client(websocket, {'type': 'world.list_result', 'worlds': worlds})
+
+
+async def handle_create_world(websocket, data: Dict[str, Any]):
+    """Create a new world."""
+    name = data.get('name', '').strip()
+    description = data.get('description', '')
+    
+    if not name:
+        await send_to_client(websocket, {'type': 'error', 'message': 'World name is required'})
+        return
+    
+    if len(name) > 50:
+        await send_to_client(websocket, {'type': 'error', 'message': 'World name must be 50 characters or less'})
+        return
+    
+    client_id = str(id(websocket))
+    world = create_world(name, description, client_id)
+    
+    logger.info(f"World created: {world['world_id']} '{name}' by {client_id}")
+    
+    await send_to_client(websocket, {'type': 'world.created', 'world': world})
+    
+    # Broadcast updated world list to all clients
+    await broadcast({'type': 'world.list_updated', 'worlds': get_all_worlds()})
+
+
+async def handle_join_world(websocket, data: Dict[str, Any]):
+    """Join a world."""
+    world_id = data.get('world_id')
+    
+    if not world_id:
+        await send_to_client(websocket, {'type': 'error', 'message': 'world_id is required'})
+        return
+    
+    # Check world exists
+    world = get_world(world_id)
+    if not world:
+        await send_to_client(websocket, {'type': 'error', 'message': f'World {world_id} not found'})
+        return
+    
+    # Leave current world if in one
+    current_world = client_worlds.get(websocket)
+    if current_world:
+        update_world_player_count(current_world, -1)
+        logger.info(f"Client left world {current_world}")
+    
+    # Join the new world
+    client_worlds[websocket] = world_id
+    update_world_player_count(world_id, 1)
+    
+    logger.info(f"Client joined world {world_id}")
+    
+    # Send join confirmation
+    world = get_world(world_id)  # Re-fetch to get updated player count
+    await send_to_client(websocket, {
+        'type': 'world.joined',
+        'world_id': world_id,
+        'world': world
+    })
+    
+    # Send world ops for sync
+    ops = get_world_ops(world_id)
+    if ops:
+        # Convert to op format expected by client
+        op_list = []
+        for op_record in ops:
+            op_data = op_record['op_data']
+            op_data['op'] = op_record['op_type']
+            op_list.append(op_data)
+        await send_to_client(websocket, {'type': 'sync_ops', 'ops': op_list})
+    else:
+        await send_to_client(websocket, {'type': 'sync_complete', 'message': 'World is empty'})
+
+
+async def handle_leave_world(websocket, data: Dict[str, Any]):
+    """Leave the current world."""
+    world_id = client_worlds.pop(websocket, None)
+    
+    if world_id:
+        update_world_player_count(world_id, -1)
+        logger.info(f"Client left world {world_id}")
+        await send_to_client(websocket, {'type': 'world.left', 'left_world_id': world_id})
+    else:
+        await send_to_client(websocket, {'type': 'world.left', 'left_world_id': None})
+
+
+async def handle_get_world(websocket, data: Dict[str, Any]):
+    """Get details of a specific world."""
+    world_id = data.get('world_id')
+    
+    if not world_id:
+        await send_to_client(websocket, {'type': 'error', 'message': 'world_id is required'})
+        return
+    
+    world = get_world(world_id)
+    if not world:
+        await send_to_client(websocket, {'type': 'error', 'message': f'World {world_id} not found'})
+        return
+    
+    await send_to_client(websocket, {'type': 'world.info', 'world': world})
 
 
 # ============================================================================
@@ -388,6 +525,17 @@ async def handle_list_files(websocket, data: Dict[str, Any]):
 async def handle_cast_request(websocket, data: Dict[str, Any]):
     """Handle a spell cast request."""
     import random
+    from datetime import timezone
+    
+    world_id = client_worlds.get(websocket)
+    
+    if not world_id:
+        await send_to_client(websocket, {
+            'type': 'spell.cast_rejected',
+            'spell_id': data.get('spell_id', ''),
+            'error': 'Must join a world first'
+        })
+        return
     
     spell_id = data.get('spell_id')
     revision_id = data.get('revision_id')
@@ -422,17 +570,18 @@ async def handle_cast_request(websocket, data: Dict[str, Any]):
     cast_seed = random.randint(0, 2**31 - 1)
     caster_id = str(id(websocket))
     
-    logger.info(f"Cast: {spell_id} rev {revision_id} by {caster_id}")
+    logger.info(f"Cast: {spell_id} rev {revision_id} by {caster_id} in world {world_id}")
     
-    # Broadcast to all clients
-    await broadcast({
+    # Broadcast to all clients in the world
+    await broadcast_to_world(world_id, {
         'type': 'spell.cast_event',
         'spell_id': spell_id,
         'revision_id': revision_id,
         'caster_id': caster_id,
+        'world_id': world_id,
         'cast_params': cast_params,
         'seed': cast_seed,
-        'timestamp': datetime.utcnow().isoformat()
+        'timestamp': datetime.now(timezone.utc).isoformat()
     })
 
 
@@ -442,6 +591,12 @@ async def handle_cast_request(websocket, data: Dict[str, Any]):
 
 async def handle_legacy_spell(websocket, data: Dict[str, Any]):
     """Handle legacy spell requests (create_land, dig)."""
+    world_id = client_worlds.get(websocket)
+    
+    if not world_id:
+        await send_to_client(websocket, {'type': 'spell_rejected', 'error': 'Must join a world first'})
+        return
+    
     spell = data.get('spell', {})
     spell_type = spell.get('type', '')
     
@@ -465,25 +620,42 @@ async def handle_legacy_spell(websocket, data: Dict[str, Any]):
         })
     
     for op in ops:
-        op_log.append(op)
-        logger.info(f"Broadcasting op: {op['op']} at {op.get('center', 'unknown')}")
-        await broadcast({'type': 'apply_op', 'op': op})
+        # Store in database
+        add_world_op(world_id, op['op'], {
+            'center': op.get('center'),
+            'radius': op.get('radius'),
+            'material_id': op.get('material_id')
+        })
+        logger.info(f"Broadcasting op to world {world_id}: {op['op']} at {op.get('center', 'unknown')}")
+        await broadcast_to_world(world_id, {'type': 'apply_op', 'op': op})
 
 
 async def handle_ping(websocket, data: Dict[str, Any]):
     """Handle ping request."""
+    world_id = client_worlds.get(websocket)
+    world_ops_count = 0
+    if world_id:
+        world_ops_count = len(get_world_ops(world_id))
+    
     await send_to_client(websocket, {
         'type': 'pong',
         'clients': len(connected_clients),
-        'ops': len(op_log)
+        'world_id': world_id,
+        'ops': world_ops_count
     })
 
 
 async def handle_clear_world(websocket, data: Dict[str, Any]):
     """Handle world clear request."""
-    op_log.clear()
-    logger.info("World cleared")
-    await broadcast({'type': 'world_cleared'})
+    world_id = client_worlds.get(websocket)
+    
+    if not world_id:
+        await send_to_client(websocket, {'type': 'error', 'message': 'Must join a world first'})
+        return
+    
+    cleared_count = clear_world_ops(world_id)
+    logger.info(f"World {world_id} cleared ({cleared_count} ops)")
+    await broadcast_to_world(world_id, {'type': 'world_cleared', 'world_id': world_id})
 
 
 # ============================================================================
@@ -492,23 +664,20 @@ async def handle_clear_world(websocket, data: Dict[str, Any]):
 
 async def handle_client(websocket: websockets.WebSocketServerProtocol):
     """Handle a client connection."""
+    from datetime import timezone
+    
     connected_clients.add(websocket)
     client_addr = websocket.remote_address
     logger.info(f"Client connected from {client_addr}. Total: {len(connected_clients)}")
     
     try:
         # Send connection acknowledgment
+        # Client should then request world list and join a world
         await send_to_client(websocket, {
             'type': 'connected',
             'client_id': str(id(websocket)),
-            'server_time': datetime.utcnow().isoformat()
+            'server_time': datetime.now(timezone.utc).isoformat()
         })
-        
-        # Send sync data for legacy world
-        if op_log:
-            await send_to_client(websocket, {'type': 'sync_ops', 'ops': op_log})
-        else:
-            await send_to_client(websocket, {'type': 'sync_complete', 'message': 'World is empty'})
         
         # Handle messages
         async for message in websocket:
@@ -517,6 +686,12 @@ async def handle_client(websocket: websockets.WebSocketServerProtocol):
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
+        # Leave current world if in one
+        world_id = client_worlds.pop(websocket, None)
+        if world_id:
+            update_world_player_count(world_id, -1)
+            logger.info(f"Client left world {world_id}")
+        
         connected_clients.discard(websocket)
         logger.info(f"Client disconnected from {client_addr}. Total: {len(connected_clients)}")
 

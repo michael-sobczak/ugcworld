@@ -90,9 +90,13 @@ func _ready() -> void:
 	if _is_ready:
 		_log("LocalLLMService ready. Available models: %d" % _registry.get_model_count())
 		
-		# Auto-load last used model if configured
-		if _settings.auto_load_last_model and not _settings.selected_model_id.is_empty():
+		# Auto-load model on startup:
+		# 1. If user has a previously selected model, load that
+		# 2. Otherwise, load the default model (tagged with "default" in models.json)
+		if not _settings.selected_model_id.is_empty():
 			call_deferred("_auto_load_model")
+		elif _registry.get_model_count() > 0:
+			call_deferred("_auto_load_default_model")
 	else:
 		_log("LocalLLMService initialized (extension not available)")
 
@@ -106,9 +110,23 @@ func _exit_tree() -> void:
 
 func _auto_load_model() -> void:
 	var model_info = _registry.get_model(_settings.selected_model_id)
-	if model_info != null:
+	if model_info != null and not model_info.is_empty():
 		_log("Auto-loading last used model: %s" % _settings.selected_model_id)
 		await load_model(_settings.selected_model_id)
+
+
+func _auto_load_default_model() -> void:
+	var default_model = _registry.get_default_model()
+	if default_model.is_empty():
+		_log("No default model found to auto-load")
+		return
+	
+	var model_id = default_model.get("id", "")
+	if model_id.is_empty():
+		return
+	
+	_log("Auto-loading default model: %s" % model_id)
+	await load_model(model_id)
 
 
 # ============================================================================

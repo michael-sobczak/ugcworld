@@ -4,6 +4,7 @@
 [ext_resource type="Script" path="res://shared/scripts/world/VoxelBackend.gd" id="2_voxel"]
 [ext_resource type="PackedScene" uid="uid://cbgwn5ggkciuq" path="res://client/scenes/LLMChatHUD.tscn" id="3_llmhud"]
 [ext_resource type="PackedScene" path="res://client/scenes/ConnectionDialog.tscn" id="4_conndlg"]
+[ext_resource type="PackedScene" path="res://client/scenes/WorldSelectionDialog.tscn" id="5_worlddlg"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_1"]
 sky_top_color = Color(0.35, 0.55, 0.85, 1)
@@ -50,3 +51,5 @@ script = ExtResource("1_client")
 [node name="LLMChatHUD" parent="." unique_id=656070106 instance=ExtResource("3_llmhud")]
 
 [node name="ConnectionDialog" parent="." unique_id=1556652101 instance=ExtResource("4_conndlg")]
+
+[node name="WorldSelectionDialog" parent="." unique_id=1495878391 instance=ExtResource("5_worlddlg")]
