@@ -253,16 +253,16 @@ func _download_revision_files(spell_id: String, revision_id: String, manifest: D
 	
 	if files_needed.is_empty():
 		# All files already cached
-		var key: String = "%s/%s" % [spell_id, revision_id]
-		_pending_downloads.erase(key)
+		var cache_key: String = "%s/%s" % [spell_id, revision_id]
+		_pending_downloads.erase(cache_key)
 		download_complete.emit(spell_id, revision_id)
 		return
 	
 	print("[SpellCache] Need to download ", files_needed.size(), " files for ", spell_id, "/", revision_id)
 	
 	# Store pending download state
-	var key: String = "%s/%s" % [spell_id, revision_id]
-	_pending_downloads[key] = {
+	var cache_key: String = "%s/%s" % [spell_id, revision_id]
+	_pending_downloads[cache_key] = {
 		"files_needed": files_needed,
 		"files_received": 0,
 		"manifest": manifest
@@ -325,11 +325,11 @@ func list_cached_spells() -> Array[String]:
 		return spells
 	
 	dir.list_dir_begin()
-	var name := dir.get_next()
-	while name != "":
-		if dir.current_is_dir() and not name.begins_with("."):
-			spells.append(name)
-		name = dir.get_next()
+	var entry_name := dir.get_next()
+	while entry_name != "":
+		if dir.current_is_dir() and not entry_name.begins_with("."):
+			spells.append(entry_name)
+		entry_name = dir.get_next()
 	dir.list_dir_end()
 	
 	return spells
@@ -345,11 +345,11 @@ func list_cached_revisions(spell_id: String) -> Array[String]:
 		return revisions
 	
 	dir.list_dir_begin()
-	var name := dir.get_next()
-	while name != "":
-		if dir.current_is_dir() and not name.begins_with("."):
-			revisions.append(name)
-		name = dir.get_next()
+	var entry_name := dir.get_next()
+	while entry_name != "":
+		if dir.current_is_dir() and not entry_name.begins_with("."):
+			revisions.append(entry_name)
+		entry_name = dir.get_next()
 	dir.list_dir_end()
 	
 	return revisions
@@ -375,15 +375,15 @@ func _delete_dir_recursive(path: String) -> void:
 		return
 	
 	dir.list_dir_begin()
-	var name := dir.get_next()
-	while name != "":
-		if name != "." and name != "..":
-			var full_path := path.path_join(name)
+	var entry_name := dir.get_next()
+	while entry_name != "":
+		if entry_name != "." and entry_name != "..":
+			var full_path := path.path_join(entry_name)
 			if dir.current_is_dir():
 				_delete_dir_recursive(full_path)
 			else:
-				dir.remove(name)
-		name = dir.get_next()
+				dir.remove(entry_name)
+		entry_name = dir.get_next()
 	dir.list_dir_end()
 	
 	# Remove the now-empty directory

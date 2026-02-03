@@ -68,7 +68,7 @@ func _on_custom_connect_pressed() -> void:
 	_connect_to(url)
 
 
-func _on_custom_url_submitted(url: String) -> void:
+func _on_custom_url_submitted(_url: String) -> void:
 	_on_custom_connect_pressed()
 
 

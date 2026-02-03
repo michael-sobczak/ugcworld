@@ -42,12 +42,6 @@ def compute_file_hash(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-def compute_file_hash_from_path(file_path: str) -> str:
-    """Compute SHA256 hash of a file from its path."""
-    with open(file_path, "rb") as f:
-        return compute_file_hash(f.read())
-
-
 # ============================================================================
 # Revision Storage
 # ============================================================================
@@ -78,14 +72,11 @@ def write_revision_file(
     revision_dir = get_revision_dir(spell_id, revision_id)
     file_path = os.path.join(revision_dir, relative_path)
     
-    # Ensure parent directory exists
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     
-    # Write content
     with open(file_path, "wb") as f:
         f.write(content)
     
-    # Return file info
     file_hash = compute_file_hash(content)
     return {
         "path": relative_path,
@@ -195,46 +186,8 @@ def read_manifest(spell_id: str, revision_id: str) -> Optional[Dict[str, Any]]:
         return json.load(f)
 
 
-# ============================================================================
-# Blob Storage (optional content-addressed storage for deduplication)
-# ============================================================================
-
-def store_blob(content: bytes) -> str:
-    """Store content as a blob and return its hash."""
-    ensure_directories()
-    
-    file_hash = compute_file_hash(content)
-    blob_path = os.path.join(BLOBS_DIR, file_hash)
-    
-    if not os.path.exists(blob_path):
-        with open(blob_path, "wb") as f:
-            f.write(content)
-    
-    return file_hash
-
-
-def get_blob(file_hash: str) -> Optional[bytes]:
-    """Retrieve a blob by its hash."""
-    blob_path = os.path.join(BLOBS_DIR, file_hash)
-    
-    if not os.path.exists(blob_path):
-        return None
-    
-    with open(blob_path, "rb") as f:
-        return f.read()
-
-
-def blob_exists(file_hash: str) -> bool:
-    """Check if a blob exists."""
-    return os.path.exists(os.path.join(BLOBS_DIR, file_hash))
-
-
-# ============================================================================
-# Cleanup
-# ============================================================================
-
 def delete_revision(spell_id: str, revision_id: str) -> bool:
-    """Delete a revision directory (use with caution)."""
+    """Delete a revision directory."""
     revision_dir = get_revision_dir(spell_id, revision_id)
     
     if os.path.exists(revision_dir):

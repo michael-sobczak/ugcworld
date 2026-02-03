@@ -23,7 +23,7 @@ func _ready() -> void:
 	var net_node = get_node_or_null("/root/Net")
 	if net_node:
 		net_node.message_received.connect(_on_message_received)
-		net_node.connected_to_server.connect(_on_connected)
+		net_node.connected_to_control_plane.connect(_on_connected)
 		net_node.disconnected_from_server.connect(_on_disconnected)
 		net_node.world_joined.connect(_on_world_joined)
 		net_node.world_left.connect(_on_world_left)
@@ -55,7 +55,7 @@ func _on_world_left(world_id: String) -> void:
 
 func _on_message_received(data: Dictionary) -> void:
 	"""Handle messages from the server."""
-	var msg_type: String = data.get("type", "")
+	var msg_type = data.get("type", "")  # Can be int or string
 	
 	match msg_type:
 		"sync_ops":
@@ -90,7 +90,7 @@ func _handle_sync_ops(data: Dictionary) -> void:
 	print("[World] Sync complete. Total ops: ", op_log.size())
 
 
-func _handle_sync_complete(data: Dictionary) -> void:
+func _handle_sync_complete(_data: Dictionary) -> void:
 	"""Handle sync complete (empty world)."""
 	_synced = true
 	sync_complete.emit()

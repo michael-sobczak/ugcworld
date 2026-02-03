@@ -9,7 +9,7 @@ signal job_progress(job_id: String, stage: String, pct: int, message: String, ex
 signal build_started(job_id: String, spell_id: String)
 signal spell_revision_ready(spell_id: String, revision_id: String, manifest: Dictionary)
 signal spell_active_update(spell_id: String, revision_id: String, channel: String, manifest: Dictionary)
-signal cast_event(spell_id: String, revision_id: String, caster_id: String, cast_params: Dictionary, seed: int)
+signal cast_event(spell_id: String, revision_id: String, caster_id: String, cast_params: Dictionary, seed_value: int)
 signal file_received(spell_id: String, revision_id: String, path: String, content: PackedByteArray)
 signal server_error(message: String)
 
@@ -19,8 +19,6 @@ var _net: Node = null
 ## Track if we're connected
 var _is_connected := false
 
-## Pending file requests
-var _pending_files: Dictionary = {}  # "spell_id/revision_id/path" -> callback
 
 
 func _ready() -> void:
@@ -31,12 +29,11 @@ func _init_references() -> void:
 	_net = get_node_or_null("/root/Net")
 	
 	if _net:
-		_net.connected_to_server.connect(_on_connected)
+		_net.connected_to_control_plane.connect(_on_connected)
 		_net.disconnected_from_server.connect(_on_disconnected)
 		_net.message_received.connect(_on_message_received)
 		
-		if _net.has_method("is_connected_to_server"):
-			_is_connected = _net.is_connected_to_server()
+		_is_connected = _net.is_connected_to_server()
 
 
 func _on_connected() -> void:
@@ -51,7 +48,7 @@ func _on_disconnected() -> void:
 
 func _on_message_received(data: Dictionary) -> void:
 	"""Handle incoming messages from server."""
-	var msg_type: String = data.get("type", "")
+	var msg_type = data.get("type", "")  # Can be int or string
 	
 	match msg_type:
 		# Job progress

@@ -2,7 +2,6 @@
 extends CanvasLayer
 
 signal world_selected(world_id: String)
-signal world_created(world_name: String)
 signal dialog_closed
 
 @onready var panel: PanelContainer = $Panel
@@ -39,7 +38,6 @@ func _ready() -> void:
 		_net.world_list_received.connect(_on_world_list_received)
 		_net.world_created.connect(_on_world_created)
 		_net.world_joined.connect(_on_world_joined)
-		_net.world_list_updated.connect(_on_world_list_updated)
 	
 	# Hide by default
 	visible = false
@@ -83,13 +81,13 @@ func _populate_world_list() -> void:
 	world_list.clear()
 	
 	for world in _worlds:
-		var name: String = world.get("name", "Unnamed World")
+		var world_name: String = world.get("name", "Unnamed World")
 		var player_count: int = world.get("player_count", 0)
-		var world_id: String = world.get("world_id", "")
+		var wid: String = world.get("world_id", "")
 		
-		var display := "%s (%d players)" % [name, player_count]
+		var display := "%s (%d players)" % [world_name, player_count]
 		world_list.add_item(display)
-		world_list.set_item_metadata(world_list.item_count - 1, world_id)
+		world_list.set_item_metadata(world_list.item_count - 1, wid)
 	
 	_update_button_states()
 
@@ -105,17 +103,18 @@ func _on_refresh_pressed() -> void:
 
 
 func _on_create_pressed() -> void:
-	var name := world_name_input.text.strip_edges()
-	if name.is_empty():
+	var new_world_name := world_name_input.text.strip_edges()
+	if new_world_name.is_empty():
 		_update_status("Please enter a world name", Color.ORANGE)
 		return
 	
-	if name.length() > 50:
+	if new_world_name.length() > 50:
 		_update_status("World name must be 50 characters or less", Color.ORANGE)
 		return
 	
 	if _net and _net.is_connected_to_server():
-		_net.create_world(name)
+		# join_world with empty world_id creates a new world
+		_net.join_world("", new_world_name)
 		_update_status("Creating world...", Color.CYAN)
 		world_name_input.text = ""
 		_update_button_states()
@@ -175,11 +174,6 @@ func _on_world_list_received(worlds: Array) -> void:
 		_update_status("No worlds found. Create one!", Color.YELLOW)
 	else:
 		_update_status("Select a world or create a new one", Color.WHITE)
-
-
-func _on_world_list_updated(worlds: Array) -> void:
-	_worlds = worlds
-	_populate_world_list()
 
 
 func _on_world_created(world: Dictionary) -> void:

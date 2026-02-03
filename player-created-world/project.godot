@@ -16,6 +16,7 @@ config/features=PackedStringArray("4.6")
 
 [autoload]
 
+Protocol="*res://shared/scripts/protocol/Protocol.gd"
 Net="*res://shared/scripts/net/Net.gd"
 World="*res://shared/scripts/world/World.gd"
 SpellCache="*res://shared/scripts/spells/SpellCache.gd"

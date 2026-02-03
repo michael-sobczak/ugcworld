@@ -176,7 +176,7 @@ func deal_damage(entity_id: String, amount: float, damage_type: String = "magic"
 
 
 ## Query entities within a radius (placeholder)
-func query_radius(position: Vector3, radius: float, filter: Dictionary = {}) -> Array:
+func query_radius(position: Vector3, radius: float, _filter: Dictionary = {}) -> Array:
 	print("[WorldAPI] query_radius at ", position, " r=", radius)
 	# Would return entities in range
 	return []

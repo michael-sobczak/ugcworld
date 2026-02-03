@@ -1,8 +1,12 @@
 """
-Database module for spell package system.
+Database module for UGC World.
 Uses SQLite for metadata storage.
 
-Supports multi-world architecture where a single server can host multiple worlds.
+Supports:
+- World management
+- Spell packages and revisions
+- Build jobs
+- Sessions
 """
 
 import sqlite3
@@ -13,7 +17,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
 
-DATABASE_PATH = os.path.join(os.path.dirname(__file__), "data", "spells.db")
+DATABASE_PATH = os.path.join(os.path.dirname(__file__), "data", "ugcworld.db")
 
 
 def ensure_data_dir():
@@ -43,7 +47,7 @@ def init_database():
     with get_connection() as conn:
         cursor = conn.cursor()
         
-        # Worlds table - tracks individual world instances hosted by this server
+        # Worlds table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS worlds (
                 world_id TEXT PRIMARY KEY,
@@ -56,20 +60,19 @@ def init_database():
             )
         """)
         
-        # World ops table - world-specific operations log
+        # World state (chunks, entities) stored as JSON
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS world_ops (
-                op_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                world_id TEXT NOT NULL,
-                op_type TEXT NOT NULL,
-                op_data TEXT NOT NULL,
-                created_at TEXT NOT NULL,
+            CREATE TABLE IF NOT EXISTS world_state (
+                world_id TEXT PRIMARY KEY,
+                chunks_json TEXT,
+                entities_json TEXT,
+                server_tick INTEGER DEFAULT 0,
+                saved_at TEXT NOT NULL,
                 FOREIGN KEY (world_id) REFERENCES worlds(world_id) ON DELETE CASCADE
             )
         """)
         
-        # Spells table - tracks spell identity and active revisions per channel
-        # Spells are global (shared across all worlds)
+        # Spells table - global spell definitions
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS spells (
                 spell_id TEXT PRIMARY KEY,
@@ -101,11 +104,9 @@ def init_database():
             CREATE TABLE IF NOT EXISTS jobs (
                 job_id TEXT PRIMARY KEY,
                 spell_id TEXT NOT NULL,
-                draft_id TEXT,
                 status TEXT NOT NULL DEFAULT 'pending',
                 stage TEXT,
                 progress_pct INTEGER DEFAULT 0,
-                logs TEXT,
                 error_message TEXT,
                 result_revision_id TEXT,
                 created_at TEXT NOT NULL,
@@ -115,28 +116,114 @@ def init_database():
         """)
         
         # Create indexes
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_worlds_name 
-            ON worlds(name)
-        """)
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_world_ops_world_id 
-            ON world_ops(world_id)
-        """)
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_revisions_spell_id 
-            ON revisions(spell_id)
-        """)
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_jobs_spell_id 
-            ON jobs(spell_id)
-        """)
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_jobs_status 
-            ON jobs(status)
-        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_worlds_name ON worlds(name)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_revisions_spell_id ON revisions(spell_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_jobs_spell_id ON jobs(spell_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
         
-        print("[DB] Database initialized successfully")
+        print("[DB] Database initialized")
+
+
+# ============================================================================
+# World CRUD
+# ============================================================================
+
+def create_world(name: str, description: str = None, created_by: str = None) -> Dict[str, Any]:
+    """Create a new world."""
+    world_id = f"world_{uuid.uuid4().hex[:8]}"
+    now = datetime.utcnow().isoformat()
+    
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO worlds (world_id, name, description, created_by, player_count, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 0, ?, ?)
+        """, (world_id, name, description, created_by, now, now))
+    
+    return get_world(world_id)
+
+
+def get_world(world_id: str) -> Optional[Dict[str, Any]]:
+    """Get a world by ID."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM worlds WHERE world_id = ?", (world_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def get_all_worlds() -> List[Dict[str, Any]]:
+    """Get all worlds."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM worlds ORDER BY created_at DESC")
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def update_world_player_count(world_id: str, delta: int) -> bool:
+    """Update world player count by delta."""
+    now = datetime.utcnow().isoformat()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE worlds SET player_count = MAX(0, player_count + ?), updated_at = ?
+            WHERE world_id = ?
+        """, (delta, now, world_id))
+        return cursor.rowcount > 0
+
+
+def delete_world(world_id: str) -> bool:
+    """Delete a world."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM world_state WHERE world_id = ?", (world_id,))
+        cursor.execute("DELETE FROM worlds WHERE world_id = ?", (world_id,))
+        return cursor.rowcount > 0
+
+
+def world_exists(world_id: str) -> bool:
+    """Check if a world exists."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM worlds WHERE world_id = ?", (world_id,))
+        return cursor.fetchone() is not None
+
+
+# ============================================================================
+# World State (for persistence)
+# ============================================================================
+
+def save_world_state(world_id: str, chunks: List, entities: List, server_tick: int) -> bool:
+    """Save world state."""
+    now = datetime.utcnow().isoformat()
+    chunks_json = json.dumps(chunks)
+    entities_json = json.dumps(entities)
+    
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT OR REPLACE INTO world_state (world_id, chunks_json, entities_json, server_tick, saved_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (world_id, chunks_json, entities_json, server_tick, now))
+        return cursor.rowcount > 0
+
+
+def load_world_state(world_id: str) -> Optional[Dict[str, Any]]:
+    """Load world state."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM world_state WHERE world_id = ?", (world_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        
+        return {
+            "world_id": row["world_id"],
+            "chunks": json.loads(row["chunks_json"] or "[]"),
+            "entities": json.loads(row["entities_json"] or "[]"),
+            "server_tick": row["server_tick"],
+            "saved_at": row["saved_at"],
+        }
 
 
 # ============================================================================
@@ -154,7 +241,7 @@ def create_spell(spell_id: str, display_name: str = None) -> Dict[str, Any]:
             INSERT INTO spells (spell_id, display_name, created_at, updated_at)
             VALUES (?, ?, ?, ?)
         """, (spell_id, display_name, now, now))
-        
+    
     return get_spell(spell_id)
 
 
@@ -175,6 +262,14 @@ def get_all_spells() -> List[Dict[str, Any]]:
         return [dict(row) for row in cursor.fetchall()]
 
 
+def spell_exists(spell_id: str) -> bool:
+    """Check if a spell exists."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM spells WHERE spell_id = ?", (spell_id,))
+        return cursor.fetchone() is not None
+
+
 def update_spell_active_revision(spell_id: str, channel: str, revision_id: str) -> bool:
     """Update the active revision for a channel."""
     now = datetime.utcnow().isoformat()
@@ -186,19 +281,9 @@ def update_spell_active_revision(spell_id: str, channel: str, revision_id: str) 
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(f"""
-            UPDATE spells 
-            SET {column} = ?, updated_at = ?
-            WHERE spell_id = ?
+            UPDATE spells SET {column} = ?, updated_at = ? WHERE spell_id = ?
         """, (revision_id, now, spell_id))
         return cursor.rowcount > 0
-
-
-def spell_exists(spell_id: str) -> bool:
-    """Check if a spell exists."""
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1 FROM spells WHERE spell_id = ?", (spell_id,))
-        return cursor.fetchone() is not None
 
 
 # ============================================================================
@@ -246,9 +331,7 @@ def get_spell_revisions(spell_id: str) -> List[Dict[str, Any]]:
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT * FROM revisions 
-            WHERE spell_id = ? 
-            ORDER BY created_at DESC
+            SELECT * FROM revisions WHERE spell_id = ? ORDER BY created_at DESC
         """, (spell_id,))
         results = []
         for row in cursor.fetchall():
@@ -262,9 +345,7 @@ def get_next_version(spell_id: str) -> int:
     """Get the next version number for a spell."""
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT MAX(version) as max_ver FROM revisions WHERE spell_id = ?
-        """, (spell_id,))
+        cursor.execute("SELECT MAX(version) as max_ver FROM revisions WHERE spell_id = ?", (spell_id,))
         row = cursor.fetchone()
         max_ver = row["max_ver"] if row and row["max_ver"] else 0
         return max_ver + 1
@@ -274,21 +355,16 @@ def get_next_version(spell_id: str) -> int:
 # Job CRUD
 # ============================================================================
 
-def create_job(
-    job_id: str,
-    spell_id: str,
-    draft_id: str = None
-) -> Dict[str, Any]:
+def create_job(job_id: str, spell_id: str) -> Dict[str, Any]:
     """Create a new build job."""
     now = datetime.utcnow().isoformat()
     
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO jobs 
-            (job_id, spell_id, draft_id, status, stage, progress_pct, created_at, updated_at)
-            VALUES (?, ?, ?, 'pending', 'waiting', 0, ?, ?)
-        """, (job_id, spell_id, draft_id, now, now))
+            INSERT INTO jobs (job_id, spell_id, status, stage, progress_pct, created_at, updated_at)
+            VALUES (?, ?, 'pending', 'waiting', 0, ?, ?)
+        """, (job_id, spell_id, now, now))
     
     return get_job(job_id)
 
@@ -307,7 +383,6 @@ def update_job(
     status: str = None,
     stage: str = None,
     progress_pct: int = None,
-    logs: str = None,
     error_message: str = None,
     result_revision_id: str = None
 ) -> bool:
@@ -326,9 +401,6 @@ def update_job(
     if progress_pct is not None:
         updates.append("progress_pct = ?")
         values.append(progress_pct)
-    if logs is not None:
-        updates.append("logs = ?")
-        values.append(logs)
     if error_message is not None:
         updates.append("error_message = ?")
         values.append(error_message)
@@ -340,147 +412,8 @@ def update_job(
     
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute(f"""
-            UPDATE jobs SET {', '.join(updates)}
-            WHERE job_id = ?
-        """, values)
+        cursor.execute(f"UPDATE jobs SET {', '.join(updates)} WHERE job_id = ?", values)
         return cursor.rowcount > 0
-
-
-def get_pending_jobs() -> List[Dict[str, Any]]:
-    """Get all pending jobs ordered by creation time."""
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT * FROM jobs 
-            WHERE status = 'pending' 
-            ORDER BY created_at ASC
-        """)
-        return [dict(row) for row in cursor.fetchall()]
-
-
-def get_spell_jobs(spell_id: str, limit: int = 10) -> List[Dict[str, Any]]:
-    """Get recent jobs for a spell."""
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT * FROM jobs 
-            WHERE spell_id = ? 
-            ORDER BY created_at DESC 
-            LIMIT ?
-        """, (spell_id, limit))
-        return [dict(row) for row in cursor.fetchall()]
-
-
-# ============================================================================
-# World CRUD
-# ============================================================================
-
-def create_world(name: str, description: str = None, created_by: str = None) -> Dict[str, Any]:
-    """Create a new world."""
-    world_id = f"world_{uuid.uuid4().hex[:8]}"
-    now = datetime.utcnow().isoformat()
-    
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO worlds (world_id, name, description, created_by, player_count, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 0, ?, ?)
-        """, (world_id, name, description, created_by, now, now))
-    
-    return get_world(world_id)
-
-
-def get_world(world_id: str) -> Optional[Dict[str, Any]]:
-    """Get a world by ID."""
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM worlds WHERE world_id = ?", (world_id,))
-        row = cursor.fetchone()
-        return dict(row) if row else None
-
-
-def get_all_worlds() -> List[Dict[str, Any]]:
-    """Get all worlds."""
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM worlds ORDER BY created_at DESC")
-        return [dict(row) for row in cursor.fetchall()]
-
-
-def update_world_player_count(world_id: str, delta: int) -> bool:
-    """Update world player count by delta."""
-    now = datetime.utcnow().isoformat()
-    
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE worlds 
-            SET player_count = MAX(0, player_count + ?), updated_at = ?
-            WHERE world_id = ?
-        """, (delta, now, world_id))
-        return cursor.rowcount > 0
-
-
-def delete_world(world_id: str) -> bool:
-    """Delete a world and its ops."""
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        # Delete ops first (cascade should handle but explicit is better)
-        cursor.execute("DELETE FROM world_ops WHERE world_id = ?", (world_id,))
-        cursor.execute("DELETE FROM worlds WHERE world_id = ?", (world_id,))
-        return cursor.rowcount > 0
-
-
-def world_exists(world_id: str) -> bool:
-    """Check if a world exists."""
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1 FROM worlds WHERE world_id = ?", (world_id,))
-        return cursor.fetchone() is not None
-
-
-# ============================================================================
-# World Ops CRUD
-# ============================================================================
-
-def add_world_op(world_id: str, op_type: str, op_data: Dict[str, Any]) -> int:
-    """Add an operation to a world."""
-    now = datetime.utcnow().isoformat()
-    op_json = json.dumps(op_data)
-    
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO world_ops (world_id, op_type, op_data, created_at)
-            VALUES (?, ?, ?, ?)
-        """, (world_id, op_type, op_json, now))
-        return cursor.lastrowid
-
-
-def get_world_ops(world_id: str) -> List[Dict[str, Any]]:
-    """Get all operations for a world."""
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT * FROM world_ops 
-            WHERE world_id = ? 
-            ORDER BY op_id ASC
-        """, (world_id,))
-        results = []
-        for row in cursor.fetchall():
-            result = dict(row)
-            result["op_data"] = json.loads(result["op_data"])
-            results.append(result)
-        return results
-
-
-def clear_world_ops(world_id: str) -> int:
-    """Clear all operations for a world. Returns count of deleted ops."""
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM world_ops WHERE world_id = ?", (world_id,))
-        return cursor.rowcount
 
 
 # Initialize on import

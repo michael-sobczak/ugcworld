@@ -210,20 +210,20 @@ static func build_context(
 ## Format a source for context inclusion
 static func _format_source(source: Dictionary) -> String:
 	var content = source.get("content", "")
-	var name = source.get("name", "")
-	var type = source.get("type", "text")
+	var source_name = source.get("name", "")
+	var source_type = source.get("type", "text")
 	
-	match type:
+	match source_type:
 		"code":
 			var lang = source.get("language", "")
-			if not name.is_empty():
-				return "### %s\n```%s\n%s\n```" % [name, lang, content]
+			if not source_name.is_empty():
+				return "### %s\n```%s\n%s\n```" % [source_name, lang, content]
 			else:
 				return "```%s\n%s\n```" % [lang, content]
 		"file":
-			return "### File: %s\n%s" % [name, content]
+			return "### File: %s\n%s" % [source_name, content]
 		"instruction":
-			return "**%s**\n%s" % [name, content] if not name.is_empty() else content
+			return "**%s**\n%s" % [source_name, content] if not source_name.is_empty() else content
 		_:
 			return content
 

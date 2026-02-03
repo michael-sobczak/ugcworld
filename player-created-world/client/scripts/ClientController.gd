@@ -79,7 +79,9 @@ func _ready() -> void:
 	
 	# Connect to network signals
 	if net_node:
-		net_node.connected_to_server.connect(_on_connected)
+		net_node.connected_to_control_plane.connect(_on_connected_to_control_plane)
+		net_node.authenticated.connect(_on_authenticated)
+		net_node.connected_to_game_server.connect(_on_connected)
 		net_node.disconnected_from_server.connect(_on_disconnected)
 		net_node.connection_failed.connect(_on_connection_failed)
 		net_node.world_joined.connect(_on_world_joined)
@@ -115,17 +117,19 @@ func _ready() -> void:
 
 
 func _connect_to_server() -> void:
-	"""Legacy connect using host/port - used for auto_connect."""
+	"""Connect using localhost control plane."""
 	if net_node:
-		print("[Client] Connecting to backend at %s:%d..." % [server_host, server_port])
-		net_node.connect_to_server(server_host, server_port)
+		net_node.control_plane_url = "http://%s:%d" % [server_host, server_port]
+		print("[Client] Logging in to %s..." % net_node.control_plane_url)
+		net_node.login("")
 
 
 func _connect_to_production() -> void:
 	"""Connect to the production server - used in release builds."""
 	if net_node:
-		print("[Client] Connecting to production at %s..." % PRODUCTION_URL)
-		net_node.connect_to_url(PRODUCTION_URL)
+		net_node.control_plane_url = PRODUCTION_URL.replace("wss://", "https://").replace("ws://", "http://")
+		print("[Client] Logging in to production...")
+		net_node.login("")
 
 
 func _is_release_build() -> bool:
@@ -156,19 +160,30 @@ func _show_world_selection_dialog() -> void:
 func _on_connection_url_requested(url: String) -> void:
 	"""Handle connection request from dialog."""
 	if net_node:
-		print("[Client] Connecting to: ", url)
-		net_node.connect_to_url(url)
+		# Convert WebSocket URL to HTTP for control plane
+		var http_url := url.replace("ws://", "http://").replace("wss://", "https://")
+		net_node.control_plane_url = http_url
+		print("[Client] Logging in to: ", http_url)
+		net_node.login("")
 
 
-func _on_connected() -> void:
-	print("[Client] Connected to backend!")
-	
-	# Notify connection dialog of success (quick hide)
-	if connection_dialog:
-		connection_dialog.show_success("Connected!", true)
+func _on_connected_to_control_plane() -> void:
+	print("[Client] Connected to control plane!")
+
+
+func _on_authenticated(_session_token: String, client_id: String) -> void:
+	print("[Client] Authenticated as: ", client_id)
 	
 	# Show world selection dialog
 	call_deferred("_show_world_selection_dialog")
+
+
+func _on_connected() -> void:
+	print("[Client] Connected to game server!")
+	
+	# Notify connection dialog of success
+	if connection_dialog:
+		connection_dialog.show_success("Connected!", true)
 
 
 func _on_disconnected() -> void:
@@ -225,7 +240,7 @@ func _on_build_started(job_id: String, spell_id: String) -> void:
 	print("[Client] Build started: ", job_id, " for ", spell_id)
 
 
-func _on_spell_active_update(spell_id: String, revision_id: String, channel: String, manifest: Dictionary) -> void:
+func _on_spell_active_update(spell_id: String, revision_id: String, channel: String, _manifest: Dictionary) -> void:
 	print("[Client] Spell %s updated on %s: %s" % [spell_id, channel, revision_id])
 
 
@@ -233,7 +248,7 @@ func _on_spell_error(message: String) -> void:
 	print("[Client] Spell error: ", message)
 
 
-func _on_spell_cast_complete(spell_id: String, revision_id: String) -> void:
+func _on_spell_cast_complete(spell_id: String, _revision_id: String) -> void:
 	print("[Client] Spell cast complete: ", spell_id)
 
 

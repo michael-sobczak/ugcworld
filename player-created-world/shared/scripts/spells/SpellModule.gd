@@ -26,25 +26,25 @@ func get_manifest() -> Dictionary:
 
 ## Called when the spell is cast. MUST be implemented by subclasses.
 ## This is the main entry point for spell execution.
-func on_cast(ctx: SpellContext) -> void:
+func on_cast(_ctx: SpellContext) -> void:
 	push_warning("SpellModule.on_cast() not implemented!")
 
 
 ## Called each frame while the spell is active.
 ## Override for spells with ongoing effects.
-func on_tick(ctx: SpellContext, dt: float) -> void:
+func on_tick(_ctx: SpellContext, _dt: float) -> void:
 	pass  # Default: no tick behavior
 
 
 ## Called when the spell is cancelled before completion.
 ## Override to clean up any ongoing effects.
-func on_cancel(ctx: SpellContext) -> void:
+func on_cancel(_ctx: SpellContext) -> void:
 	pass  # Default: no cancel behavior
 
 
 ## Called when a custom event is received.
 ## Override to handle events from other spells or systems.
-func on_event(ctx: SpellContext, event: Dictionary) -> void:
+func on_event(_ctx: SpellContext, _event: Dictionary) -> void:
 	pass  # Default: ignore events
 
 

@@ -111,6 +111,38 @@ These singletons are always available (defined in project.godot):
 - Prefer signals over direct method calls for decoupling
 - Document autoload dependencies in script header comments
 
+### GDScript Validation (REQUIRED)
+
+After writing or modifying any `.gd` file, you MUST validate the script syntax using Godot's headless mode:
+
+**Single script validation:**
+```powershell
+cd player-created-world
+godot --headless --check-only --script res://path/to/script.gd
+```
+
+**Full project validation:**
+```powershell
+cd player-created-world
+godot --headless --check-only
+```
+
+**Workflow:**
+1. After creating or editing a GDScript file, run the validation command
+2. If errors are reported, fix them immediately before proceeding
+3. Re-run validation to confirm the fix
+4. Only consider the task complete when validation passes with no errors
+
+**Common validation errors to watch for:**
+- Missing type annotations on variables/parameters
+- Incorrect signal syntax
+- Invalid method signatures
+- Missing `extends` declaration
+- Cyclic dependencies between scripts
+- Invalid autoload references
+
+**Note:** The `--check-only` flag validates syntax without running the game. Exit code 0 means success, non-zero means errors were found.
+
 ### Python Style
 
 - Use type hints: `def function(param: str) -> Dict[str, Any]:`
@@ -122,10 +154,11 @@ These singletons are always available (defined in project.godot):
 
 Before committing changes:
 
-1. **Localhost test**: Run `python app_socketio.py` and connect from Godot editor
-2. **Multi-client test**: Open two Godot instances, both connect to same server
-3. **Build test**: Export the game and verify production connection works
-4. **Documentation check**: Ensure docs reflect any changes made
+1. **GDScript validation**: Run `godot --headless --check-only` in `player-created-world/` to validate all scripts
+2. **Localhost test**: Run `python app_socketio.py` and connect from Godot editor
+3. **Multi-client test**: Open two Godot instances, both connect to same server
+4. **Build test**: Export the game and verify production connection works
+5. **Documentation check**: Ensure docs reflect any changes made
 
 ## Common Tasks
 

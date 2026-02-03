@@ -1,0 +1,31 @@
+; Authoritative Game Server for UGC World
+; Run headless: godot --headless --main-pack server.pck
+; Or: godot --headless --path . --main-scene res://server/scenes/GameServer.tscn
+
+config_version=5
+
+[application]
+
+config/name="UGC World Game Server"
+run/main_scene="res://server/scenes/GameServer.tscn"
+config/features=PackedStringArray("4.6")
+
+[autoload]
+
+Protocol="*res://shared/protocol/Protocol.gd"
+EntityRegistry="*res://server/scripts/EntityRegistry.gd"
+
+[display]
+
+window/size/viewport_width=320
+window/size/viewport_height=240
+window/vsync/vsync_mode=0
+
+[physics]
+
+3d/default_gravity=24.8
+common/physics_ticks_per_second=60
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
