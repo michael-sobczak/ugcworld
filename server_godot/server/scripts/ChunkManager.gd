@@ -4,6 +4,9 @@ extends Node
 
 ## Chunk size in voxels
 const CHUNK_SIZE := 32
+const DEFAULT_FLOOR_Y := 0
+const DEFAULT_FLOOR_MATERIAL := 1
+const DEFAULT_FLOOR_RADIUS_CHUNKS := 2
 
 ## Loaded chunks: "cx_cy_cz" -> ChunkData
 var _chunks: Dictionary = {}
@@ -38,6 +41,18 @@ class ChunkData:
 
 func _ready() -> void:
 	print("[ChunkManager] Initialized with chunk size %d" % CHUNK_SIZE)
+	_initialize_default_floor()
+
+func _initialize_default_floor() -> void:
+	if _chunks.size() > 0:
+		return
+	for cx in range(-DEFAULT_FLOOR_RADIUS_CHUNKS, DEFAULT_FLOOR_RADIUS_CHUNKS + 1):
+		for cz in range(-DEFAULT_FLOOR_RADIUS_CHUNKS, DEFAULT_FLOOR_RADIUS_CHUNKS + 1):
+			var chunk := get_or_create_chunk(cx, 0, cz)
+			for x in range(CHUNK_SIZE):
+				for z in range(CHUNK_SIZE):
+					chunk.set_voxel(x, DEFAULT_FLOOR_Y, z, DEFAULT_FLOOR_MATERIAL)
+	print("[ChunkManager] Default floor initialized")
 
 
 func _get_chunk_key(cx: int, cy: int, cz: int) -> String:

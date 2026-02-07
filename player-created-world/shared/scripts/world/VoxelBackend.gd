@@ -33,6 +33,11 @@ var _fallback_sub_material: StandardMaterial3D = null
 ## Counter for fallback sphere names
 var _fallback_sphere_count: int = 0
 
+## Default floor (fallback visual only)
+@export var default_floor_enabled: bool = true
+@export var default_floor_size: Vector3 = Vector3(200.0, 1.0, 200.0)
+@export var default_floor_y: float = -0.5
+
 
 func _ready() -> void:
 	# Skip voxel rendering on headless server
@@ -64,6 +69,9 @@ func _ready() -> void:
 		push_error("[VoxelBackend] World autoload not found!")
 		_active = false
 
+	if _using_fallback and default_floor_enabled:
+		_create_default_floor()
+
 
 func _setup_fallback_visualizer() -> void:
 	_using_fallback = true
@@ -81,6 +89,17 @@ func _setup_fallback_visualizer() -> void:
 	_fallback_sub_material = StandardMaterial3D.new()
 	_fallback_sub_material.albedo_color = Color(0.3, 0.2, 0.15, 0.6)
 	_fallback_sub_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+
+func _create_default_floor() -> void:
+	if _fallback_visualizer == null:
+		return
+	var floor := CSGBox3D.new()
+	floor.name = "DefaultFloor"
+	floor.size = default_floor_size
+	floor.material = _fallback_add_material
+	floor.operation = CSGShape3D.OPERATION_UNION
+	floor.global_position = Vector3(0.0, default_floor_y, 0.0)
+	_fallback_visualizer.add_child(floor)
 
 
 func _is_headless() -> bool:
