@@ -10,7 +10,7 @@ func after_each() -> void:
 
 func test_world_create_and_connect() -> void:
 	var tree := Engine.get_main_loop() as SceneTree
-	var port := _random_port()
+	var port := _find_free_port(12000, 20000)
 	var base_url := "http://127.0.0.1:%d" % port
 
 	var project_dir := ProjectSettings.globalize_path("res://")
@@ -102,7 +102,22 @@ func _cleanup_process() -> void:
 		OS.kill(_server_pid)
 	_server_pid = -1
 
-func _random_port() -> int:
+func _find_free_port(min_port: int, max_port: int) -> int:
 	var rng := RandomNumberGenerator.new()
 	rng.randomize()
-	return rng.randi_range(5001, 9000)
+	var attempts := 50
+	for _i in range(attempts):
+		var candidate := rng.randi_range(min_port, max_port)
+		if not _is_port_in_use(candidate):
+			return candidate
+	return rng.randi_range(min_port, max_port)
+
+func _is_port_in_use(port: int) -> bool:
+	var peer := StreamPeerTCP.new()
+	var err := peer.connect_to_host("127.0.0.1", port)
+	if err == OK:
+		peer.disconnect_from_host()
+		return true
+	if err == ERR_BUSY:
+		return true
+	return false

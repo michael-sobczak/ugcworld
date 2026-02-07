@@ -81,6 +81,27 @@ DELETE /world/<world_id> - Delete world
 GET  /worlds            - List all worlds
 ```
 
+#### Spell Build (HTTP fallback for editor/dev clients)
+
+```
+POST /api/spells/<spell_id>/build
+    Headers: Authorization: Bearer <session_token>
+    Request: { "prompt": "", "code": "...", "options": { "metadata": {...} } }
+    Response: { "job_id": "...", "spell_id": "..." }
+
+GET  /api/jobs/<job_id>
+    Response: { "status": "...", "stage": "...", "progress_pct": 0-100, "result_revision_id": "..." }
+
+POST /api/spells/<spell_id>/publish
+    Headers: Authorization: Bearer <session_token>
+    Request: { "revision_id": "...", "channel": "beta" }
+    Response: { "spell_id": "...", "revision_id": "...", "channel": "beta", "manifest": {...} }
+
+GET  /api/spells/<spell_id>/revisions
+GET  /api/spells/<spell_id>/revisions/<revision_id>/manifest
+GET  /api/spells/<spell_id>/revisions/<revision_id>/files/<path>
+```
+
 World state is stored as JSON files containing:
 - Chunk voxel data (compressed)
 - Entity positions and states

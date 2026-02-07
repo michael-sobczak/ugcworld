@@ -46,6 +46,10 @@ if (-not $godot) {
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 New-Item -ItemType Directory -Force -Path $resultsDir | Out-Null
 
+# Disable editor auto server/client to keep tests isolated
+$env:UGCWORLD_AUTOSTART_SERVER = "0"
+$env:UGCWORLD_AUTOCONNECT = "0"
+
 & $godot --headless --path $projectDir --editor --quit
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

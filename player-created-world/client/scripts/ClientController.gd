@@ -369,11 +369,27 @@ func _release_mouse() -> void:
 func _get_cast_target() -> Vector3:
 	if camera == null:
 		return Vector3.ZERO
+	var viewport := get_viewport()
+	var mouse_pos := viewport.get_mouse_position()
+	var ray_origin := camera.project_ray_origin(mouse_pos)
+	var ray_dir := camera.project_ray_normal(mouse_pos).normalized()
 	
-	var cam_pos := camera.global_position
-	var cam_forward := -camera.global_transform.basis.z
+	var world := camera.get_world_3d()
+	if world == null:
+		return ray_origin + ray_dir * cast_distance
+	var space: PhysicsDirectSpaceState3D = world.direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(
+		ray_origin,
+		ray_origin + ray_dir * cast_distance
+	)
+	query.collide_with_areas = true
+	query.collide_with_bodies = true
 	
-	return cam_pos + cam_forward * cast_distance
+	var hit: Dictionary = space.intersect_ray(query)
+	if hit.has("position"):
+		return hit["position"]
+	
+	return ray_origin + ray_dir * cast_distance
 
 
 # ============================================================================
@@ -549,11 +565,11 @@ func on_cast(ctx: SpellContext) -> void:
 	print("[demo_spark] Effect complete!")
 
 
-func on_tick(ctx: SpellContext, dt: float) -> void:
+func on_tick(_ctx: SpellContext, _dt: float) -> void:
 	pass
 
 
-func on_cancel(ctx: SpellContext) -> void:
+func on_cancel(_ctx: SpellContext) -> void:
 	print("[demo_spark] Cancelled")
 """
 
@@ -621,10 +637,10 @@ func on_cast(ctx: SpellContext) -> void:
 		})
 
 
-func on_tick(ctx: SpellContext, dt: float) -> void:
+func on_tick(_ctx: SpellContext, _dt: float) -> void:
 	pass
 
 
-func on_cancel(ctx: SpellContext) -> void:
+func on_cancel(_ctx: SpellContext) -> void:
 	print("[demo_spawn] Cancelled")
 """

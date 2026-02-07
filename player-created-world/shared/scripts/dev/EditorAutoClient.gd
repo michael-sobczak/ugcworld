@@ -12,6 +12,7 @@ func _ready() -> void:
 		return
 	_apply_control_plane_override()
 	Net.authenticated.connect(_on_authenticated)
+	Net.world_list_received.connect(_on_world_list_received)
 	Net.world_joined.connect(_on_world_joined)
 	Net.connection_failed.connect(_on_connection_failed)
 	call_deferred("_start_login")
@@ -26,7 +27,21 @@ func _on_authenticated(_session_token: String, _client_id: String) -> void:
 	if _pending_world_join:
 		return
 	_pending_world_join = true
-	Net.join_world("", _get_world_name())
+	var world_id_override := OS.get_environment("UGCWORLD_EDITOR_WORLD_ID")
+	if world_id_override != "":
+		Net.join_world(world_id_override, "")
+		return
+	Net.request_world_list()
+
+func _on_world_list_received(worlds: Array) -> void:
+	if not _pending_world_join:
+		return
+	var target_name := _get_world_name()
+	for world in worlds:
+		if world is Dictionary and world.get("name", "") == target_name:
+			Net.join_world(world.get("world_id", ""), "")
+			return
+	Net.join_world("", target_name)
 
 func _on_world_joined(_world_id: String, _world: Dictionary) -> void:
 	_pending_world_join = false

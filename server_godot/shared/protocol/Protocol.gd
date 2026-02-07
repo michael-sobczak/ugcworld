@@ -8,7 +8,7 @@ const PROTOCOL_VERSION := 1
 ## Tick rate configuration
 const SERVER_TICK_RATE := 60  ## Physics ticks per second
 const SNAPSHOT_RATE := 20  ## Snapshots per second (every 3 ticks at 60hz)
-const TICKS_PER_SNAPSHOT := SERVER_TICK_RATE / SNAPSHOT_RATE
+const TICKS_PER_SNAPSHOT := int(SERVER_TICK_RATE / SNAPSHOT_RATE)
 
 ## Message types - Client to Server
 enum ClientMsg {

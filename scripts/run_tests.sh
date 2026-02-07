@@ -31,6 +31,10 @@ fi
 
 mkdir -p "$LOG_DIR" "$RESULTS_DIR"
 
+# Disable editor auto server/client to keep tests isolated
+export UGCWORLD_AUTOSTART_SERVER=0
+export UGCWORLD_AUTOCONNECT=0
+
 "$GODOT_BIN" --headless --path "$PROJECT_DIR" --editor --quit
 
 "$GODOT_BIN" --headless --path "$PROJECT_DIR" \

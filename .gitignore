@@ -44,4 +44,7 @@ venv/
 ugc_backend/data/
 env.sh
 
+# Control plane generated data
+server_python/data/
+
 player-created-world/models/*.gguf

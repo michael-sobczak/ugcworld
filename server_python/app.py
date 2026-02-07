@@ -478,6 +478,19 @@ def api_list_spells():
     return jsonify({"spells": get_all_spells()})
 
 
+@app.route("/api/spells/<spell_id>/revisions", methods=["GET"])
+def api_list_spell_revisions(spell_id: str):
+    return jsonify({"spell_id": spell_id, "revisions": get_spell_revisions(spell_id)})
+
+
+@app.route("/api/spells/<spell_id>/revisions/<revision_id>/manifest", methods=["GET"])
+def api_get_spell_manifest(spell_id: str, revision_id: str):
+    manifest = read_manifest(spell_id, revision_id)
+    if not manifest:
+        return jsonify({"error": "Manifest not found"}), 404
+    return jsonify({"spell_id": spell_id, "revision_id": revision_id, "manifest": manifest})
+
+
 @app.route("/api/spells/<spell_id>/revisions/<revision_id>/files/<path:file_path>", methods=["GET"])
 def api_get_spell_file(spell_id: str, revision_id: str, file_path: str):
     revision_dir = get_revision_dir(spell_id, revision_id)
@@ -487,6 +500,73 @@ def api_get_spell_file(spell_id: str, revision_id: str, file_path: str):
         return jsonify({"error": "File not found"}), 404
     
     return send_file(full_path)
+
+
+@app.route("/api/spells/<spell_id>/build", methods=["POST"])
+def api_start_spell_build(spell_id: str):
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return jsonify({"error": "Missing authorization"}), 401
+    session = validate_session(auth[7:])
+    if not session:
+        return jsonify({"error": "Invalid session"}), 401
+
+    data = request.get_json() or {}
+    if not spell_id:
+        return jsonify({"error": "spell_id required"}), 400
+
+    if not spell_exists(spell_id):
+        create_spell(spell_id)
+
+    job_id = f"job_{uuid.uuid4().hex[:12]}"
+    create_job(job_id, spell_id)
+
+    build_options = {
+        "prompt": data.get("prompt", ""),
+        "code": data.get("code"),
+        "parent_revision_id": data.get("options", {}).get("parent_revision_id"),
+        "metadata": data.get("options", {}).get("metadata", {}),
+    }
+
+    worker = get_worker()
+    worker.enqueue_job(job_id, build_options)
+
+    return jsonify({"job_id": job_id, "spell_id": spell_id})
+
+
+@app.route("/api/spells/<spell_id>/publish", methods=["POST"])
+def api_publish_spell(spell_id: str):
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return jsonify({"error": "Missing authorization"}), 401
+    session = validate_session(auth[7:])
+    if not session:
+        return jsonify({"error": "Invalid session"}), 401
+
+    data = request.get_json() or {}
+    revision_id = data.get("revision_id")
+    channel = data.get("channel", "beta")
+    if not revision_id:
+        return jsonify({"error": "revision_id required"}), 400
+    if not revision_exists(spell_id, revision_id):
+        return jsonify({"error": "Revision not found"}), 404
+
+    update_spell_active_revision(spell_id, channel, revision_id)
+    manifest = read_manifest(spell_id, revision_id)
+    return jsonify({
+        "spell_id": spell_id,
+        "revision_id": revision_id,
+        "channel": channel,
+        "manifest": manifest or {}
+    })
+
+
+@app.route("/api/jobs/<job_id>", methods=["GET"])
+def api_get_job(job_id: str):
+    job = get_job(job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    return jsonify(job)
 
 
 # Admin

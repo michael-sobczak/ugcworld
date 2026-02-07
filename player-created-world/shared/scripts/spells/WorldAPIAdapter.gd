@@ -138,6 +138,7 @@ func play_vfx(asset_id: String, position: Vector3, params: Dictionary = {}) -> N
 	
 	# Create a simple particle placeholder effect
 	var effect := _create_simple_particle_effect(position, params)
+	_spawn_editor_debug_marker(position, params)
 	return effect
 
 
@@ -230,3 +231,29 @@ func _create_simple_particle_effect(position: Vector3, params: Dictionary) -> GP
 		_scene_root.add_child(particles)
 	
 	return particles
+
+func _spawn_editor_debug_marker(position: Vector3, params: Dictionary) -> void:
+	if not _scene_root:
+		return
+	if not OS.has_feature("editor") or OS.has_feature("standalone"):
+		return
+	var marker := MeshInstance3D.new()
+	var mesh := SphereMesh.new()
+	mesh.radius = 0.4
+	mesh.height = 0.8
+	marker.mesh = mesh
+	var material := StandardMaterial3D.new()
+	var color: Color = params.get("color", Color.CYAN)
+	material.albedo_color = color
+	material.emission_enabled = true
+	material.emission = color
+	material.emission_energy_multiplier = 2.5
+	marker.material_override = material
+	marker.global_position = position
+	_scene_root.add_child(marker)
+	var timer := Timer.new()
+	timer.wait_time = 1.5
+	timer.one_shot = true
+	timer.timeout.connect(func(): marker.queue_free())
+	marker.add_child(timer)
+	timer.start()
