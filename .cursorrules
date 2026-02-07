@@ -160,6 +160,14 @@ Before committing changes:
 4. **Build test**: Export the game and verify production connection works
 5. **Documentation check**: Ensure docs reflect any changes made
 
+## Cursor Agent Rule: Always Run Tests
+
+The agent MUST run the automated test suite for any code change:
+
+- Preferred: `./scripts/run_tests.sh all` or `.\scripts\run_tests.ps1 -Mode all`
+- If only unit tests are affected and time is constrained: run `unit` only and note why.
+- If GDScript files were changed, run `godot --headless --check-only` first.
+
 ## Common Tasks
 
 ### Adding a New Socket.IO Event

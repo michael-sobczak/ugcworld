@@ -158,6 +158,9 @@ func request_world_list() -> void:
 	if _cp_ws and _cp_ws.get_ready_state() == WebSocketPeer.STATE_OPEN:
 		_send_to_control_plane({"type": "world.list"})
 	else:
+		if _http and _http.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
+			print("[Net] Skipping world list request - HTTPRequest busy")
+			return
 		# Use HTTP fallback
 		_pending_request = "worlds"
 		var headers := ["Authorization: Bearer " + session_token] if session_token else []

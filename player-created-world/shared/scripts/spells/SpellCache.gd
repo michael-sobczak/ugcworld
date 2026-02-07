@@ -251,9 +251,9 @@ func _download_revision_files(spell_id: String, revision_id: String, manifest: D
 		if not file_cached(spell_id, revision_id, file_path):
 			files_needed.append(file_path)
 	
+	var cache_key: String = "%s/%s" % [spell_id, revision_id]
 	if files_needed.is_empty():
 		# All files already cached
-		var cache_key: String = "%s/%s" % [spell_id, revision_id]
 		_pending_downloads.erase(cache_key)
 		download_complete.emit(spell_id, revision_id)
 		return
@@ -261,7 +261,6 @@ func _download_revision_files(spell_id: String, revision_id: String, manifest: D
 	print("[SpellCache] Need to download ", files_needed.size(), " files for ", spell_id, "/", revision_id)
 	
 	# Store pending download state
-	var cache_key: String = "%s/%s" % [spell_id, revision_id]
 	_pending_downloads[cache_key] = {
 		"files_needed": files_needed,
 		"files_received": 0,

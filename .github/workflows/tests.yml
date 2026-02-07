@@ -1,0 +1,50 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Godot (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p "$HOME/godot"
+          curl -L -o "$HOME/godot/godot.zip" "https://downloads.tuxfamily.org/godotengine/4.6/Godot_v4.6-stable_linux.x86_64_headless.zip"
+          unzip -q "$HOME/godot/godot.zip" -d "$HOME/godot"
+          chmod +x "$HOME/godot/Godot_v4.6-stable_linux.x86_64_headless"
+          echo "GODOT_BIN=$HOME/godot/Godot_v4.6-stable_linux.x86_64_headless" >> "$GITHUB_ENV"
+
+      - name: Download Godot (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          Invoke-WebRequest -Uri "https://downloads.tuxfamily.org/godotengine/4.6/Godot_v4.6-stable_win64_console.exe" -OutFile "$env:RUNNER_TEMP\godot.exe"
+          "GODOT_BIN=$env:RUNNER_TEMP\godot.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Run tests (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          chmod +x scripts/run_tests.sh
+          ./scripts/run_tests.sh all
+
+      - name: Run tests (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          .\scripts\run_tests.ps1 -Mode all
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ matrix.os }}
+          path: artifacts/test-logs

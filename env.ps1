@@ -4,6 +4,8 @@
 # Path to Godot 4.6 executable (used to spawn headless game servers)
 # UPDATE THIS to match your Godot installation
 $env:GODOT_PATH = "C:\Users\micha\Downloads\Godot_v4.6-stable_win64.exe\Godot_v4.6-stable_win64.exe"
+# Test runner uses GODOT_BIN; keep it in sync with GODOT_PATH
+$env:GODOT_BIN = $env:GODOT_PATH
 
 # Path to headless game server project
 $env:GAME_SERVER_PATH = "$PWD\server_godot"

@@ -25,10 +25,12 @@ SpellRegistry="*res://shared/scripts/spells/SpellRegistry.gd"
 SpellNet="*res://shared/scripts/spells/SpellNet.gd"
 SpellCastController="*res://shared/scripts/spells/SpellCastController.gd"
 LocalLLMService="*uid://darjvvrvmfi6s"
+EditorAutoServer="*res://shared/scripts/dev/EditorAutoServer.gd"
+EditorAutoClient="*res://shared/scripts/dev/EditorAutoClient.gd"
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/local_llm/plugin.cfg")
+enabled=PackedStringArray("res://addons/local_llm/plugin.cfg", "res://addons/gdUnit4/plugin.cfg")
 
 [physics]
 

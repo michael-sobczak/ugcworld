@@ -8,7 +8,7 @@ const PROTOCOL_VERSION := 1
 ## Tick rate configuration
 const SERVER_TICK_RATE := 60  ## Physics ticks per second
 const SNAPSHOT_RATE := 20  ## Snapshots per second (every 3 ticks at 60hz)
-const TICKS_PER_SNAPSHOT := SERVER_TICK_RATE / SNAPSHOT_RATE
+const TICKS_PER_SNAPSHOT := int(SERVER_TICK_RATE / SNAPSHOT_RATE)
 
 ## Message types - Client to Server
 enum ClientMsg {
@@ -322,7 +322,7 @@ static func build_spell_cast_event(
 	revision_id: String,
 	caster_entity_id: int,
 	target_position: Vector3,
-	seed: int,
+	seed_value: int,
 	extra_params: Dictionary = {}
 ) -> Dictionary:
 	"""Build spell cast event broadcast to all clients."""
@@ -333,7 +333,7 @@ static func build_spell_cast_event(
 		"revision_id": revision_id,
 		"caster_entity_id": caster_entity_id,
 		"target_position": _vec3_to_array(target_position),
-		"seed": seed,
+		"seed": seed_value,
 		"extra_params": extra_params,
 	}
 
