@@ -22,6 +22,11 @@ extends Node
 @export var move_speed: float = 20.0
 @export var fast_move_multiplier: float = 3.0
 @export var mouse_sensitivity: float = 0.003
+@export var drag_move_speed: float = 0.02
+@export var scroll_zoom_speed: float = 4.0
+@export var zoom_smoothness: float = 10.0
+@export var move_smoothness: float = 12.0
+@export var rotate_smoothness: float = 18.0
 
 ## Spell settings
 @export var default_brush_radius: float = 8.0
@@ -48,6 +53,12 @@ var world_selection_dialog: Node = null
 ## State
 var _mouse_captured: bool = false
 var _camera_rotation: Vector2 = Vector2.ZERO
+var _dragging_left: bool = false
+var _dragging_right: bool = false
+var _last_mouse_pos: Vector2 = Vector2.ZERO
+var _default_camera_transform: Transform3D
+var _target_camera_pos: Vector3 = Vector3.ZERO
+var _target_camera_rot: Vector2 = Vector2.ZERO
 
 ## Track latest built revisions for publishing
 var _latest_revisions: Dictionary = {}  # spell_id -> revision_id
@@ -64,8 +75,11 @@ func _ready() -> void:
 	# Find camera in scene
 	camera = get_viewport().get_camera_3d()
 	if camera:
+		_default_camera_transform = camera.global_transform
 		var euler = camera.global_transform.basis.get_euler()
 		_camera_rotation = Vector2(euler.y, euler.x)
+		_target_camera_pos = camera.global_position
+		_target_camera_rot = _camera_rotation
 	
 	# Find connection dialog in scene
 	connection_dialog = get_node_or_null("../ConnectionDialog")
@@ -257,17 +271,31 @@ func _on_spell_cast_failed(spell_id: String, error: String) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	# Mouse look when captured
-	if event is InputEventMouseMotion and _mouse_captured:
-		_camera_rotation.x -= event.relative.x * mouse_sensitivity
-		_camera_rotation.y -= event.relative.y * mouse_sensitivity
-		_camera_rotation.y = clamp(_camera_rotation.y, -PI/2 + 0.1, PI/2 - 0.1)
-		_update_camera_rotation()
+	if event is InputEventMouseButton:
+		var mouse_event := event as InputEventMouseButton
+		if mouse_event.button_index == MOUSE_BUTTON_LEFT:
+			_dragging_left = mouse_event.pressed
+			_last_mouse_pos = mouse_event.position
+		elif mouse_event.button_index == MOUSE_BUTTON_RIGHT:
+			_dragging_right = mouse_event.pressed
+			_last_mouse_pos = mouse_event.position
+		elif mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_zoom_camera(-1.0)
+		elif mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_zoom_camera(1.0)
 	
-	# Toggle mouse capture
-	if event is InputEventMouseButton and event.pressed:
-		if event.button_index == MOUSE_BUTTON_RIGHT:
-			_toggle_mouse_capture()
+	if event is InputEventMouseMotion and camera != null:
+		var motion := event as InputEventMouseMotion
+		var delta := motion.position - _last_mouse_pos
+		_last_mouse_pos = motion.position
+		if _dragging_right:
+			_target_camera_rot.x -= delta.x * mouse_sensitivity
+			_target_camera_rot.y -= delta.y * mouse_sensitivity
+			_target_camera_rot.y = clamp(_target_camera_rot.y, -PI/2 + 0.1, PI/2 - 0.1)
+		elif _dragging_left:
+			var right := camera.global_transform.basis.x
+			var up := camera.global_transform.basis.y
+			_target_camera_pos += (-right * delta.x + up * delta.y) * drag_move_speed
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -298,10 +326,13 @@ func _unhandled_input(event: InputEvent) -> void:
 				_publish_spell("demo_spawn")
 			KEY_ESCAPE:
 				_release_mouse()
+			KEY_R:
+				_reset_camera()
 
 
 func _process(delta: float) -> void:
 	_handle_camera_movement(delta)
+	_apply_camera_smoothing(delta)
 
 
 func _handle_camera_movement(delta: float) -> void:
@@ -340,7 +371,15 @@ func _handle_camera_movement(delta: float) -> void:
 		right = right.normalized() if right.length() > 0.01 else Vector3.RIGHT
 		
 		var move_dir := (forward * -input_dir.z + right * input_dir.x + Vector3.UP * input_dir.y).normalized()
-		camera.global_position += move_dir * speed * delta
+		_target_camera_pos += move_dir * speed * delta
+
+func _apply_camera_smoothing(delta: float) -> void:
+	if camera == null:
+		return
+	_camera_rotation = _camera_rotation.lerp(_target_camera_rot, 1.0 - exp(-rotate_smoothness * delta))
+	_update_camera_rotation()
+	var pos_lerp := 1.0 - exp(-move_smoothness * delta)
+	camera.global_position = camera.global_position.lerp(_target_camera_pos, pos_lerp)
 
 
 func _update_camera_rotation() -> void:
@@ -364,6 +403,21 @@ func _capture_mouse() -> void:
 func _release_mouse() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	_mouse_captured = false
+
+func _reset_camera() -> void:
+	if camera == null:
+		return
+	camera.global_transform = _default_camera_transform
+	var euler := camera.global_transform.basis.get_euler()
+	_camera_rotation = Vector2(euler.y, euler.x)
+	_target_camera_rot = _camera_rotation
+	_target_camera_pos = camera.global_position
+
+func _zoom_camera(direction: float) -> void:
+	if camera == null:
+		return
+	var forward := -camera.global_transform.basis.z
+	_target_camera_pos += forward * scroll_zoom_speed * direction
 
 
 func _get_cast_target() -> Vector3:
