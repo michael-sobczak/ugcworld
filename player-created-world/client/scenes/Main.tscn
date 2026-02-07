@@ -2,6 +2,7 @@
 
 [ext_resource type="Script" uid="uid://bigwr4rd7dcbm" path="res://client/scripts/ClientController.gd" id="1_client"]
 [ext_resource type="Script" path="res://shared/scripts/world/VoxelBackend.gd" id="2_voxel"]
+[ext_resource type="Script" path="res://client/scripts/GlbShowcase.gd" id="6_glb_showcase"]
 [ext_resource type="PackedScene" uid="uid://cbgwn5ggkciuq" path="res://client/scenes/LLMChatHUD.tscn" id="3_llmhud"]
 [ext_resource type="PackedScene" path="res://client/scenes/ConnectionDialog.tscn" id="4_conndlg"]
 [ext_resource type="PackedScene" path="res://client/scenes/WorldSelectionDialog.tscn" id="5_worlddlg"]
@@ -47,6 +48,9 @@ script = ExtResource("2_voxel")
 
 [node name="ClientController" type="Node" parent="." unique_id=1615734095]
 script = ExtResource("1_client")
+
+[node name="GlbShowcase" type="Node3D" parent="."]
+script = ExtResource("6_glb_showcase")
 
 [node name="LLMChatHUD" parent="." unique_id=656070106 instance=ExtResource("3_llmhud")]
 
