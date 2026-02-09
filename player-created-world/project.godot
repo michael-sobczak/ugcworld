@@ -12,6 +12,8 @@ config_version=5
 
 config/name="Player Created World"
 run/main_scene="res://client/scenes/Main.tscn"
+config/use_custom_user_dir=true
+config/custom_user_dir_name="PlayerCreatedWorld"
 config/features=PackedStringArray("4.6")
 
 [autoload]

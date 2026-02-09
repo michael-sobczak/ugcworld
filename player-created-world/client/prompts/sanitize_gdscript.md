@@ -19,4 +19,10 @@ Also fix:
 - Ensure file starts with extends
 - Ensure static typing where obvious
 
+CRITICAL — No external assets allowed:
+- Replace ANY load("res://...") or preload("res://...") calls with procedural alternatives
+- If the code loads a texture file (.png, .svg, .tres), replace it with an Image + ImageTexture created in code (e.g. draw a white circle via pixel math)
+- If the code loads a scene (.tscn), replace it with constructing the node tree in code
+- NEVER leave any load() or preload() call in the output
+
 Output the complete corrected file, nothing else.

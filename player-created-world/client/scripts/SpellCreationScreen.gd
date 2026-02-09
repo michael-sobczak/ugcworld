@@ -1,43 +1,44 @@
-## Spell Creation Screen - LLM-assisted spell description drafting
+## Spell Creation Screen - Graph-based LLM spell pipeline
 ## Autoloads: LocalLLMService
+##
+## Each pipeline step (description, manifest, particle, shape, sanitize,
+## human review, compile & save) is a node in a directed graph built with
+## the Custom Graph Editor addon.
+## Edges represent data flow: the output of one step feeds as input to the next.
+## All LLM calls go through _llm_request / _llm_generate which use
+## generate_streaming on a C++ worker thread (never blocks the UI).
 extends CanvasLayer
+
+const SpellGraphNode := preload("res://client/scripts/spell_graph/SpellGraphNode.gd")
 
 const DESCRIPTION_PROMPT_PATH := "res://client/prompts/generate_spell_description.md"
 const ASSET_PROMPT_PATH := "res://client/prompts/generate_spell_asset_manifest.md"
 const PARTICLE_PROMPT_PATH := "res://client/prompts/generate_particle_effect.md"
 const SHAPE_PROMPT_PATH := "res://client/prompts/generate_simple_shapes.md"
 const SANITIZE_PROMPT_PATH := "res://client/prompts/sanitize_gdscript.md"
-const OUTPUT_TITLE_DESCRIPTION := "Spell Description"
-const OUTPUT_TITLE_ASSETS := "Asset Manifest"
 
-@onready var panel: PanelContainer = $Panel
 @onready var close_button: Button = $Panel/VBox/Header/CloseButton
 @onready var input_field: TextEdit = $Panel/VBox/InputContainer/InputField
 @onready var send_button: Button = $Panel/VBox/InputContainer/SendButton
-@onready var output_root: VBoxContainer = $Panel/VBox/OutputScroll/OutputRoot
 @onready var status_label: Label = $Panel/VBox/StatusBar/StatusLabel
+@onready var graph_editor: CGEGraphEditor = $Panel/VBox/GraphContainer/SpellGraph
 
-var _description_prompt: String = ""
-var _asset_prompt: String = ""
-var _particle_prompt: String = ""
-var _shape_prompt: String = ""
-var _sanitize_prompt: String = ""
+var _prompts: Dictionary = {}
 var _is_generating: bool = false
 var _current_handle: Object = null
 var _loaded_model_id: String = ""
 
-## Parsed asset manifest entries: Array of {type, description}
-var _asset_entries: Array[Dictionary] = []
-## Per-asset generated code keyed by index (particles) or "shapes" (merged shapes)
-var _asset_results: Dictionary = {}
-## UI references for asset table rows keyed same way
-var _asset_row_refs: Dictionary = {}
-## Container for the asset table
-var _asset_table_container: VBoxContainer = null
-## Container for asset generation output (below table)
-var _asset_gen_container: VBoxContainer = null
-## Currently previewed particle instance (for cleanup)
-var _preview_instance: Node = null
+## Maps graph node IDs to their SpellGraphNode data for quick access
+var _node_data: Dictionary = {}  # node_id -> SpellGraphNode
+
+## Maps Human Review node IDs to their downstream chain { "validate": id, "compile": id }
+var _review_chain: Dictionary = {}  # review_node_id -> { "validate": int, "compile": int }
+
+## Tracks pending popup to avoid opening during drags
+var _pending_popup_node_id: int = -1
+
+## Currently open popup overlay (if any)
+var _active_popup: Control = null
 
 
 func _ready() -> void:
@@ -46,36 +47,54 @@ func _ready() -> void:
 	input_field.gui_input.connect(_on_input_gui_input)
 
 	visible = false
-	_description_prompt = _load_prompt(DESCRIPTION_PROMPT_PATH)
-	_asset_prompt = _load_prompt(ASSET_PROMPT_PATH)
-	_particle_prompt = _load_prompt(PARTICLE_PROMPT_PATH)
-	_shape_prompt = _load_prompt(SHAPE_PROMPT_PATH)
-	_sanitize_prompt = _load_prompt(SANITIZE_PROMPT_PATH)
+	_prompts = {
+		"description": _load_prompt(DESCRIPTION_PROMPT_PATH),
+		"assets": _load_prompt(ASSET_PROMPT_PATH),
+		"particle": _load_prompt(PARTICLE_PROMPT_PATH),
+		"shape": _load_prompt(SHAPE_PROMPT_PATH),
+		"sanitize": _load_prompt(SANITIZE_PROMPT_PATH),
+	}
 	_update_status("")
+	_configure_graph_editor()
+
+	# Connect to graph editor selection for node click popups
+	graph_editor.graph_element_selected.connect(_on_graph_element_clicked)
 
 
 func show_screen(model_id: String) -> void:
 	_loaded_model_id = model_id
 	visible = true
-	_clear_outputs()
-	_asset_entries.clear()
-	_asset_results.clear()
-	_asset_row_refs.clear()
-	_asset_table_container = null
-	_asset_gen_container = null
-	_cleanup_preview()
+	_clear_graph()
 	input_field.text = ""
 	input_field.grab_focus()
 	_update_status("Ready")
+	_set_camera_controls(false)
 
 
 func hide_screen() -> void:
-	_cleanup_preview()
+	_close_active_popup()
 	visible = false
+	_set_camera_controls(true)
 
 
 func _on_close_pressed() -> void:
 	hide_screen()
+
+
+# ============================================================================
+# Input Handling
+# ============================================================================
+
+func _input(event: InputEvent) -> void:
+	if not visible:
+		return
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_ESCAPE:
+			if _active_popup != null:
+				_close_active_popup()
+			else:
+				hide_screen()
+			get_viewport().set_input_as_handled()
 
 
 func _on_input_gui_input(event: InputEvent) -> void:
@@ -88,888 +107,1096 @@ func _on_input_gui_input(event: InputEvent) -> void:
 func _on_send_pressed() -> void:
 	if _is_generating:
 		return
-
 	var prompt := input_field.text.strip_edges()
 	if prompt.is_empty():
 		return
+	if not _ensure_llm_ready():
+		return
 
+	_begin_generating("Running spell pipeline...")
+	_clear_graph()
+	_run_spell_pipeline(prompt)
+
+
+# ============================================================================
+# Graph Editor Configuration
+# ============================================================================
+
+## Hide the toolbar (File / Edit / Add Node menu) and other chrome that is
+## not needed for the spell creation pipeline display.
+func _configure_graph_editor() -> void:
+	# Use the graph editor's own internal references (set via @onready before
+	# our _ready runs, since children are readied first).
+	if graph_editor._toolbar != null:
+		graph_editor._toolbar.visible = false
+	if graph_editor._inspector_panel != null:
+		graph_editor._inspector_panel.visible = false
+	if graph_editor._h_scroll_bar != null:
+		graph_editor._h_scroll_bar.visible = false
+	if graph_editor._v_scroll_bar != null:
+		graph_editor._v_scroll_bar.visible = false
+
+	# Left-click on empty space pans the view instead of drag-box selecting
+	graph_editor.left_click_pans = true
+
+
+# ============================================================================
+# Camera Control Toggle
+# ============================================================================
+
+## Enable or disable the 3D camera controls in the ClientController.
+func _set_camera_controls(enabled: bool) -> void:
+	var controller := get_node_or_null("../ClientController")
+	if controller and "camera_controls_enabled" in controller:
+		controller.camera_controls_enabled = enabled
+
+
+# ============================================================================
+# Uniform LLM Interface (non-blocking, worker thread)
+# ============================================================================
+
+func _llm_request(prompt: String, system_prompt: String, opts: Dictionary = {}) -> String:
+	var handle = LocalLLMService.generate_streaming({
+		"prompt": prompt,
+		"system_prompt": system_prompt,
+		"max_tokens": opts.get("max_tokens", 1024),
+		"temperature": opts.get("temperature", 0.7),
+	})
+	if handle == null:
+		return ""
+	_current_handle = handle
+	var result := await _await_handle(handle)
+	_current_handle = null
+	return result
+
+
+func _llm_generate(prompt: String, system_prompt: String, opts: Dictionary = {}) -> String:
+	return await _llm_request(prompt, system_prompt, opts)
+
+
+func _await_handle(handle: Object) -> String:
+	if handle == null:
+		return ""
+	while handle.get_status() == 0 or handle.get_status() == 1:
+		await get_tree().process_frame
+	if handle.get_status() == 2:
+		return handle.get_full_text()
+	return ""
+
+
+# ============================================================================
+# Helpers
+# ============================================================================
+
+func _ensure_llm_ready() -> bool:
 	if not LocalLLMService.is_extension_available():
-		_show_message_panel("Error", "Local LLM extension not available. Build the extension first.")
-		return
-
+		_update_status("LLM extension not available")
+		return false
 	if not LocalLLMService.is_model_loaded():
-		_show_message_panel("Error", "No model loaded. Press S to select a model.")
-		return
+		_update_status("No model loaded. Press S to select a model.")
+		return false
+	return true
 
-	var model_id := LocalLLMService.get_loaded_model_id()
-	if not _loaded_model_id.is_empty() and model_id != _loaded_model_id:
-		_loaded_model_id = model_id
 
+func _begin_generating(msg: String) -> void:
 	_is_generating = true
 	send_button.disabled = true
-	_update_status("Generating description...")
-	_clear_outputs()
-	_asset_entries.clear()
-	_asset_results.clear()
-	_asset_row_refs.clear()
-	_asset_table_container = null
-	_asset_gen_container = null
-	_cleanup_preview()
-
-	var description_panel := _create_output_panel(OUTPUT_TITLE_DESCRIPTION, output_root)
-	_current_handle = _start_generation(
-		prompt,
-		_description_prompt,
-		description_panel,
-		"description"
-	)
-
-	if _current_handle == null:
-		_generation_finished("Failed to start generation")
-		return
+	_update_status(msg)
 
 
-func _on_token_received(token: String, panel_data: Dictionary) -> void:
-	var label: RichTextLabel = panel_data.get("text_label")
-	if label == null:
-		return
-	label.append_text(token)
-	await get_tree().process_frame
-	label.scroll_to_line(label.get_line_count())
-
-
-func _on_generation_completed(text: String, panel_data: Dictionary, stage: String) -> void:
-	if stage == "description":
-		_update_status("Generating asset manifest...")
-		var children_box: VBoxContainer = panel_data.get("children_box")
-		var asset_panel := _create_output_panel(OUTPUT_TITLE_ASSETS, children_box)
-		_current_handle = _start_generation(
-			text,
-			_asset_prompt,
-			asset_panel,
-			"assets"
-		)
-		if _current_handle == null:
-			_generation_finished("Failed to start asset generation")
-	elif stage == "assets":
-		_parse_and_build_asset_table(text)
-		_generation_finished("Done - select assets below")
-	elif stage == "asset_gen":
-		_generation_finished("Asset generated")
-	else:
-		_generation_finished("Done")
-
-
-func _on_generation_error(message: String, panel_data: Dictionary, _stage: String) -> void:
-	var label: RichTextLabel = panel_data.get("text_label")
-	if label:
-		label.append_text("\n\n[Error] %s" % message)
-	_generation_finished("Error")
-
-
-func _on_generation_cancelled(panel_data: Dictionary, _stage: String) -> void:
-	var label: RichTextLabel = panel_data.get("text_label")
-	if label:
-		label.append_text("\n\n[Cancelled]")
-	_generation_finished("Cancelled")
-
-
-func _generation_finished(status: String) -> void:
+func _finish_generating(msg: String) -> void:
 	_is_generating = false
 	send_button.disabled = false
-	_update_status(status)
+	_update_status(msg)
 
 
 func _update_status(message: String) -> void:
 	var model_id := LocalLLMService.get_loaded_model_id()
-	var status := "Model: "
-	if model_id.is_empty():
-		status += "None"
-	else:
-		status += model_id
-
+	var s := "Model: %s" % (model_id if not model_id.is_empty() else "None")
 	if not message.is_empty():
-		status += " | " + message
-
-	if _description_prompt.is_empty():
-		status += " | Missing description prompt"
-	if _asset_prompt.is_empty():
-		status += " | Missing asset prompt"
-
-	status_label.text = status
+		s += " | " + message
+	status_label.text = s
 
 
 func _load_prompt(path: String) -> String:
 	if not FileAccess.file_exists(path):
 		return ""
-
 	var file := FileAccess.open(path, FileAccess.READ)
 	if file == null:
 		return ""
-
 	var text := file.get_as_text()
 	file.close()
 	return text
 
 
-func _clear_outputs() -> void:
-	_cleanup_preview()
-	for child in output_root.get_children():
-		output_root.remove_child(child)
-		child.queue_free()
-
-
-func _show_message_panel(title: String, message: String) -> void:
-	_clear_outputs()
-	var msg_panel := _create_output_panel(title, output_root)
-	var label: RichTextLabel = msg_panel.get("text_label")
-	if label:
-		label.text = message
-
-
-func _create_output_panel(title: String, parent_container: VBoxContainer) -> Dictionary:
-	var panel_container := PanelContainer.new()
-	panel_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-
-	var panel_vbox := VBoxContainer.new()
-	panel_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel_vbox.add_theme_constant_override("separation", 6)
-	panel_container.add_child(panel_vbox)
-
-	# Header row with title and toggle button
-	var header_row := HBoxContainer.new()
-	header_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel_vbox.add_child(header_row)
-
-	var title_label := Label.new()
-	title_label.text = title
-	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header_row.add_child(title_label)
-
-	var toggle_btn := Button.new()
-	toggle_btn.text = "Show"
-	toggle_btn.custom_minimum_size = Vector2(60, 0)
-	header_row.add_child(toggle_btn)
-
-	# Content wrapper (hidden by default, shown via toggle)
-	var content_wrapper := VBoxContainer.new()
-	content_wrapper.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	content_wrapper.visible = false
-	panel_vbox.add_child(content_wrapper)
-
-	var text_label := RichTextLabel.new()
-	text_label.bbcode_enabled = false
-	text_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	text_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	text_label.fit_content = true
-	text_label.scroll_following = true
-	text_label.selection_enabled = true
-	content_wrapper.add_child(text_label)
-
-	var indent := MarginContainer.new()
-	indent.add_theme_constant_override("margin_left", 16)
-	indent.add_theme_constant_override("margin_top", 8)
-	content_wrapper.add_child(indent)
-
-	var children_box := VBoxContainer.new()
-	children_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	children_box.add_theme_constant_override("separation", 8)
-	indent.add_child(children_box)
-
-	# Wire toggle button
-	toggle_btn.pressed.connect(func() -> void:
-		content_wrapper.visible = not content_wrapper.visible
-		toggle_btn.text = "Hide" if content_wrapper.visible else "Show"
-	)
-
-	parent_container.add_child(panel_container)
-
-	return {
-		"container": panel_container,
-		"text_label": text_label,
-		"children_box": children_box,
-		"content_wrapper": content_wrapper,
-		"toggle_btn": toggle_btn
-	}
-
-
-func _start_generation(
-	prompt: String,
-	system_prompt: String,
-	panel_data: Dictionary,
-	stage: String
-) -> Object:
-	var handle = LocalLLMService.generate_streaming({
-		"prompt": prompt,
-		"system_prompt": system_prompt,
-		"max_tokens": 1024,
-		"temperature": 0.7
-	})
-
-	if handle == null:
-		return null
-
-	handle.token.connect(_on_token_received.bind(panel_data))
-	handle.completed.connect(_on_generation_completed.bind(panel_data, stage))
-	handle.error.connect(_on_generation_error.bind(panel_data, stage))
-	handle.cancelled.connect(_on_generation_cancelled.bind(panel_data, stage))
-
-	return handle
-
-
-func _cleanup_preview() -> void:
-	if _preview_instance != null and is_instance_valid(_preview_instance):
-		_preview_instance.queue_free()
-		_preview_instance = null
+func _clear_graph() -> void:
+	graph_editor.graph.clear_all()
+	_node_data.clear()
+	_review_chain.clear()
 
 
 # ============================================================================
-# Asset Table
+# Graph Node Helpers
 # ============================================================================
 
-func _parse_and_build_asset_table(manifest_text: String) -> void:
-	_asset_entries.clear()
-	_asset_results.clear()
-	_asset_row_refs.clear()
+func _add_graph_node(step_type: int, label: String, prompt_key: String, pos: Vector2) -> int:
+	var node: CGEGraphNode = graph_editor.graph.create_node()
+	var node_id: int = node.id
 
-	# Try to extract JSON array from the LLM output
-	var json_text := _extract_json_array(manifest_text)
-	var json := JSON.new()
-	var err := json.parse(json_text)
-	if err != OK:
-		_show_asset_table_error("Failed to parse asset manifest JSON: %s" % json.get_error_message())
+	# Set SpellGraphNode-specific data
+	var spell_node: SpellGraphNode = node as SpellGraphNode
+	spell_node.step_type = step_type
+	spell_node.step_label = label
+	spell_node.prompt_key = prompt_key
+	spell_node.status = "pending"
+
+	_node_data[node_id] = spell_node
+
+	# Position the UI node
+	var ui_node := graph_editor.get_graph_node(node_id)
+	if ui_node:
+		ui_node.position = pos
+		ui_node.refresh()
+
+	return node_id
+
+
+func _add_graph_edge(from_id: int, to_id: int) -> void:
+	graph_editor.graph.create_link(from_id, to_id)
+
+
+func _set_node_status(node_id: int, status: String, result: String = "", error: String = "") -> void:
+	var spell_node: SpellGraphNode = _node_data.get(node_id) as SpellGraphNode
+	if spell_node == null:
 		return
+	spell_node.status = status
+	if not result.is_empty():
+		spell_node.result_text = result
+	if not error.is_empty():
+		spell_node.error_text = error
 
-	var data = json.get_data()
-	if not data is Array:
-		_show_asset_table_error("Asset manifest is not an array")
-		return
-
-	for entry in data:
-		if entry is Dictionary:
-			var entry_type: String = str(entry.get("type", "unknown"))
-			var entry_desc: String = str(entry.get("description", ""))
-			_asset_entries.append({"type": entry_type, "description": entry_desc})
-
-	if _asset_entries.is_empty():
-		_show_asset_table_error("No assets found in manifest")
-		return
-
-	_build_asset_table_ui()
+	var ui_node := graph_editor.get_graph_node(node_id)
+	if ui_node and ui_node.has_method("refresh"):
+		ui_node.refresh()
 
 
-func _extract_json_array(text: String) -> String:
-	var start := text.find("[")
-	var end := text.rfind("]")
-	if start >= 0 and end > start:
-		return text.substr(start, end - start + 1)
-	return text
+func _set_node_input(node_id: int, input: String) -> void:
+	var spell_node: SpellGraphNode = _node_data.get(node_id) as SpellGraphNode
+	if spell_node:
+		spell_node.input_text = input
 
 
-func _show_asset_table_error(message: String) -> void:
-	if _asset_table_container != null:
-		return
-	_asset_table_container = VBoxContainer.new()
-	_asset_table_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	output_root.add_child(_asset_table_container)
-
-	var lbl := Label.new()
-	lbl.text = "Asset Table Error: %s" % message
-	lbl.modulate = Color.RED
-	_asset_table_container.add_child(lbl)
-
-
-func _build_asset_table_ui() -> void:
-	_asset_table_container = VBoxContainer.new()
-	_asset_table_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_asset_table_container.add_theme_constant_override("separation", 4)
-	output_root.add_child(_asset_table_container)
-
-	var title := Label.new()
-	title.text = "Assets"
-	title.add_theme_font_size_override("font_size", 16)
-	_asset_table_container.add_child(title)
-
-	var header := _create_table_row("Type", "Asset", "Description", true)
-	_asset_table_container.add_child(header)
-
-	var shape_indices: Array[int] = []
-	for i in range(_asset_entries.size()):
-		if _asset_entries[i]["type"] == "shape":
-			shape_indices.append(i)
-
-	var shape_row_built := false
-	for i in range(_asset_entries.size()):
-		var entry: Dictionary = _asset_entries[i]
-		var entry_type: String = entry["type"]
-		var entry_desc: String = entry["description"]
-
-		if entry_type == "shape":
-			if not shape_row_built:
-				var combined_desc := ""
-				for si in shape_indices:
-					var sd: String = _asset_entries[si]["description"]
-					combined_desc += "- %s\n" % sd
-				var row := _create_asset_row("shape", "shapes", combined_desc.strip_edges(), shape_indices.size())
-				_asset_table_container.add_child(row)
-				shape_row_built = true
-		else:
-			var row := _create_asset_row(entry_type, str(i), entry_desc, 1)
-			_asset_table_container.add_child(row)
-
-	var sep := HSeparator.new()
-	_asset_table_container.add_child(sep)
-
-	_asset_gen_container = VBoxContainer.new()
-	_asset_gen_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_asset_gen_container.add_theme_constant_override("separation", 8)
-	_asset_table_container.add_child(_asset_gen_container)
-
-
-func _create_table_row(col1: String, col2: String, col3: String, is_header: bool) -> HBoxContainer:
-	var row := HBoxContainer.new()
-	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_theme_constant_override("separation", 8)
-
-	var lbl1 := Label.new()
-	lbl1.text = col1
-	lbl1.custom_minimum_size = Vector2(80, 0)
-	if is_header:
-		lbl1.add_theme_font_size_override("font_size", 13)
-		lbl1.modulate = Color(0.7, 0.85, 1.0)
-	row.add_child(lbl1)
-
-	var lbl2 := Label.new()
-	lbl2.text = col2
-	lbl2.custom_minimum_size = Vector2(100, 0)
-	if is_header:
-		lbl2.add_theme_font_size_override("font_size", 13)
-		lbl2.modulate = Color(0.7, 0.85, 1.0)
-	row.add_child(lbl2)
-
-	var lbl3 := Label.new()
-	lbl3.text = col3
-	lbl3.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	lbl3.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	if is_header:
-		lbl3.add_theme_font_size_override("font_size", 13)
-		lbl3.modulate = Color(0.7, 0.85, 1.0)
-	row.add_child(lbl3)
-
-	return row
-
-
-func _create_asset_row(asset_type: String, key: String, description: String, count: int) -> PanelContainer:
-	var row_panel := PanelContainer.new()
-	row_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-
-	var row := HBoxContainer.new()
-	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_theme_constant_override("separation", 8)
-	row_panel.add_child(row)
-
-	var type_label := Label.new()
-	type_label.custom_minimum_size = Vector2(80, 0)
-	if asset_type == "shape":
-		type_label.text = "shape (%d)" % count
-	else:
-		type_label.text = asset_type
-	row.add_child(type_label)
-
-	var asset_box := HBoxContainer.new()
-	asset_box.custom_minimum_size = Vector2(100, 0)
-	row.add_child(asset_box)
-
-	var select_btn := Button.new()
-	select_btn.text = "Select"
-	select_btn.custom_minimum_size = Vector2(70, 0)
-	asset_box.add_child(select_btn)
-
-	var asset_status := Label.new()
-	asset_status.text = ""
-	asset_status.visible = false
-	asset_box.add_child(asset_status)
-
-	var desc_label := Label.new()
-	desc_label.text = description
-	desc_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	desc_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	row.add_child(desc_label)
-
-	_asset_row_refs[key] = {
-		"panel": row_panel,
-		"select_btn": select_btn,
-		"asset_status": asset_status,
-		"type": asset_type,
-		"description": description,
-		"key": key
-	}
-
-	select_btn.pressed.connect(_on_asset_select_pressed.bind(key))
-
-	return row_panel
-
-
-func _on_asset_select_pressed(key: String) -> void:
-	if _is_generating:
-		return
-
-	var row_ref: Dictionary = _asset_row_refs.get(key, {})
-	if row_ref.is_empty():
-		return
-
-	var asset_type: String = row_ref.get("type", "")
-	var description: String = row_ref.get("description", "")
-
-	# Clear previous generation output
-	_cleanup_preview()
-	if _asset_gen_container != null:
-		for child in _asset_gen_container.get_children():
-			_asset_gen_container.remove_child(child)
-			child.queue_free()
-
-	var system_prompt: String = ""
-	var user_prompt: String = ""
-	if asset_type == "particle":
-		system_prompt = _particle_prompt
-		user_prompt = description
-	elif asset_type == "shape":
-		system_prompt = _shape_prompt
-		user_prompt = description
-	else:
-		user_prompt = description
-
-	if system_prompt.is_empty():
-		_update_status("Missing prompt for asset type: %s" % asset_type)
-		return
-
-	_is_generating = true
-	send_button.disabled = true
-	_update_status("Generating %s asset..." % asset_type)
-
-	if asset_type == "particle":
-		_start_particle_asset_generation(user_prompt, system_prompt, key)
-	else:
-		# Shape or other: use the existing text-only flow
-		var gen_title := "Generating: %s" % asset_type
-		if asset_type == "shape":
-			gen_title = "Generating: shapes (merged)"
-
-		var gen_panel := _create_output_panel(gen_title, _asset_gen_container)
-		var content_wrapper: VBoxContainer = gen_panel.get("content_wrapper")
-		var toggle_btn: Button = gen_panel.get("toggle_btn")
-		if content_wrapper != null:
-			content_wrapper.visible = true
-		if toggle_btn != null:
-			toggle_btn.text = "Hide"
-
-		_current_handle = _start_asset_generation(
-			user_prompt,
-			system_prompt,
-			gen_panel,
-			key
-		)
-
-		if _current_handle == null:
-			_generation_finished("Failed to start asset generation")
-
-
-func _start_asset_generation(
-	prompt: String,
-	system_prompt: String,
-	panel_data: Dictionary,
-	asset_key: String
-) -> Object:
-	var handle = LocalLLMService.generate_streaming({
-		"prompt": prompt,
-		"system_prompt": system_prompt,
-		"max_tokens": 1024,
-		"temperature": 0.7
-	})
-
-	if handle == null:
-		return null
-
-	handle.token.connect(_on_token_received.bind(panel_data))
-	handle.completed.connect(_on_asset_gen_completed.bind(panel_data, asset_key))
-	handle.error.connect(_on_generation_error.bind(panel_data, asset_key))
-	handle.cancelled.connect(_on_generation_cancelled.bind(panel_data, asset_key))
-
-	return handle
-
-
-func _on_asset_gen_completed(text: String, _panel_data: Dictionary, asset_key: String) -> void:
-	var code := _extract_gdscript(text)
-
-	# Run LLM sanitization pass if prompt is available
-	if not _sanitize_prompt.is_empty() and LocalLLMService.is_model_loaded():
-		_update_status("Sanitizing generated code...")
-		var sanitized := await _run_sanitize_pass(code)
-		if not sanitized.is_empty():
-			code = sanitized
-
-	_asset_results[asset_key] = code
-	_mark_row_selected(asset_key)
-	_generation_finished("Asset generated")
-
-
-func _mark_row_selected(asset_key: String) -> void:
-	var row_ref: Dictionary = _asset_row_refs.get(asset_key, {})
-	if row_ref.is_empty():
-		return
-
-	var row_panel: PanelContainer = row_ref.get("panel")
-	var select_btn: Button = row_ref.get("select_btn")
-	var asset_status: Label = row_ref.get("asset_status")
-
-	if row_panel != null:
-		var style := StyleBoxFlat.new()
-		style.bg_color = Color(0.2, 0.4, 0.2, 0.6)
-		style.set_corner_radius_all(4)
-		row_panel.add_theme_stylebox_override("panel", style)
-
-	if select_btn != null:
-		select_btn.text = "Reselect"
-	if asset_status != null:
-		asset_status.text = "Generated"
-		asset_status.modulate = Color.LIME
-		asset_status.visible = true
+func _get_node_result(node_id: int) -> String:
+	var spell_node: SpellGraphNode = _node_data.get(node_id) as SpellGraphNode
+	if spell_node == null:
+		return ""
+	return spell_node.result_text
 
 
 # ============================================================================
-# Particle Asset – Preview + Editable Code
+# Graph Centering & Auto-Zoom
 # ============================================================================
 
-func _start_particle_asset_generation(description: String, system_prompt: String, asset_key: String) -> void:
-	if _asset_gen_container == null:
-		_generation_finished("No asset generation container")
+## Reposition all graph nodes so the pipeline is centred in the view.
+## Automatically adjusts zoom so the full graph fits with padding.
+func _center_graph_nodes() -> void:
+	if _node_data.is_empty():
 		return
 
-	# Build the particle asset UI container
-	var particle_ui := _build_particle_asset_ui(asset_key)
-	_asset_gen_container.add_child(particle_ui.container)
+	var min_pos := Vector2(INF, INF)
+	var max_pos := Vector2(-INF, -INF)
 
-	# Start streaming into the hidden RichTextLabel
-	var streaming_label: RichTextLabel = particle_ui.streaming_label
+	for node_id in _node_data:
+		var ui_node := graph_editor.get_graph_node(node_id)
+		if ui_node == null:
+			continue
+		min_pos.x = min(min_pos.x, ui_node.position.x)
+		min_pos.y = min(min_pos.y, ui_node.position.y)
+		max_pos.x = max(max_pos.x, ui_node.position.x + ui_node.size.x)
+		max_pos.y = max(max_pos.y, ui_node.position.y + ui_node.size.y)
 
-	var handle = LocalLLMService.generate_streaming({
-		"prompt": description,
-		"system_prompt": system_prompt,
-		"max_tokens": 1024,
-		"temperature": 0.7
-	})
+	var graph_center := (min_pos + max_pos) / 2.0
+	var graph_size := max_pos - min_pos
 
-	if handle == null:
-		_generation_finished("Failed to start particle generation")
+	# Shift every node so the graph centroid sits at the world origin
+	for node_id in _node_data:
+		var ui_node := graph_editor.get_graph_node(node_id)
+		if ui_node:
+			ui_node.position -= graph_center
+
+	# Refresh all links after repositioning
+	for node_id in _node_data:
+		var ui_node := graph_editor.get_graph_node(node_id)
+		if ui_node:
+			ui_node.moved.emit()
+
+	# Auto-zoom to fit the graph in the visible area
+	var view_size := graph_editor.size
+	if view_size.x > 0 and view_size.y > 0 and graph_size.x > 0 and graph_size.y > 0:
+		var padding := 60.0
+		var available := view_size - Vector2(padding, padding)
+		var zoom_x := available.x / graph_size.x
+		var zoom_y := available.y / graph_size.y
+		var target_zoom := minf(minf(zoom_x, zoom_y), 1.0)  # Don't zoom in past 1.0
+		target_zoom = clamp(target_zoom, graph_editor.min_zoom, graph_editor.max_zoom)
+		graph_editor.set_zoom(target_zoom)
+
+	# Centre the view on the origin (where the graph now sits)
+	graph_editor._center_scrollbars()
+
+
+# ============================================================================
+# Node Click → Popup System
+# ============================================================================
+
+## Called when a graph element is selected (clicked).
+## After a short delay, if the node wasn't dragged, show a detail popup.
+func _on_graph_element_clicked(element) -> void:
+	if _is_generating or _active_popup != null:
+		return
+	if not element is CGEGraphNodeUI:
+		_pending_popup_node_id = -1
 		return
 
-	# Stream tokens into the streaming label
-	var stream_panel: Dictionary = {"text_label": streaming_label}
-	handle.token.connect(_on_token_received.bind(stream_panel))
-	handle.completed.connect(_on_particle_gen_completed.bind(particle_ui, asset_key))
-	handle.error.connect(func(msg: String) -> void:
-		particle_ui.error_label.text = "Generation error: %s" % msg
-		particle_ui.error_label.visible = true
-		_generation_finished("Particle generation error")
-	)
-	handle.cancelled.connect(func() -> void:
-		particle_ui.error_label.text = "Generation cancelled"
-		particle_ui.error_label.visible = true
-		_generation_finished("Cancelled")
-	)
+	var ui_node := element as CGEGraphNodeUI
+	var spell_node := ui_node.graph_element as SpellGraphNode
+	if spell_node == null:
+		_pending_popup_node_id = -1
+		return
 
-	_current_handle = handle
+	var node_id := spell_node.id
+	var start_pos := ui_node.position
+	_pending_popup_node_id = node_id
 
+	# Brief delay to distinguish click from drag
+	await get_tree().create_timer(0.25).timeout
 
-## Holds references to all the particle UI widgets for one asset key
-class ParticleAssetUI:
-	var container: VBoxContainer
-	var preview_panel: PanelContainer
-	var preview_viewport: SubViewport
-	var preview_viewport_container: SubViewportContainer
-	var code_wrapper: VBoxContainer
-	var code_editor: TextEdit
-	var code_toggle_btn: Button
-	var recompile_btn: Button
-	var error_label: Label
-	var streaming_label: RichTextLabel
-	var play_btn: Button
-	var asset_key: String
+	# Verify it was a click, not a drag, and nothing else happened
+	if _pending_popup_node_id != node_id:
+		return
+	if _active_popup != null:
+		return
+	var current_ui := graph_editor.get_graph_node(node_id)
+	if current_ui == null:
+		return
+	if current_ui.position.distance_to(start_pos) > 3.0:
+		return  # Was dragged
+
+	_pending_popup_node_id = -1
+	_show_popup_for_node(spell_node)
 
 
-func _build_particle_asset_ui(asset_key: String) -> ParticleAssetUI:
-	var ui := ParticleAssetUI.new()
-	ui.asset_key = asset_key
+## Route to the appropriate popup based on step type.
+func _show_popup_for_node(spell_node: SpellGraphNode) -> void:
+	match spell_node.step_type:
+		SpellGraphNode.StepType.HUMAN_REVIEW:
+			_show_human_review_popup(spell_node)
+		SpellGraphNode.StepType.COMPILE_SAVE:
+			_show_compile_preview_popup(spell_node)
+		SpellGraphNode.StepType.VALIDATE:
+			_show_node_detail_popup(spell_node)  # Shows input/output/error
+		_:
+			_show_node_detail_popup(spell_node)
 
-	# Root container
-	ui.container = VBoxContainer.new()
-	ui.container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	ui.container.add_theme_constant_override("separation", 8)
 
-	# --- Title row ---
+# ============================================================================
+# Popup Helpers
+# ============================================================================
+
+## Create a centred popup overlay and return the VBox for content.
+func _open_popup(title_text: String, popup_size: Vector2 = Vector2(550, 400)) -> VBoxContainer:
+	_close_active_popup()
+
+	# Semi-transparent overlay to block interaction with the graph
+	var overlay := ColorRect.new()
+	overlay.name = "PopupOverlay"
+	overlay.color = Color(0, 0, 0, 0.4)
+	overlay.anchor_right = 1.0
+	overlay.anchor_bottom = 1.0
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+
+	# Centring wrapper
+	var center := CenterContainer.new()
+	center.anchor_right = 1.0
+	center.anchor_bottom = 1.0
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	overlay.add_child(center)
+
+	# Panel
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = popup_size
+	center.add_child(panel)
+
+	# Margin
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_top", 12)
+	margin.add_theme_constant_override("margin_right", 16)
+	margin.add_theme_constant_override("margin_bottom", 12)
+	panel.add_child(margin)
+
+	# VBox
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 8)
+	margin.add_child(vbox)
+
+	# Title row
 	var title_row := HBoxContainer.new()
-	title_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	ui.container.add_child(title_row)
+	vbox.add_child(title_row)
 
 	var title_lbl := Label.new()
-	title_lbl.text = "Particle Effect Preview"
+	title_lbl.text = title_text
+	title_lbl.add_theme_font_size_override("font_size", 16)
 	title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title_lbl.add_theme_font_size_override("font_size", 15)
 	title_row.add_child(title_lbl)
 
-	# --- Preview panel with SubViewport ---
-	ui.preview_panel = PanelContainer.new()
-	ui.preview_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	ui.preview_panel.custom_minimum_size = Vector2(0, 200)
-	var preview_style := StyleBoxFlat.new()
-	preview_style.bg_color = Color(0.05, 0.05, 0.08, 1.0)
-	preview_style.set_corner_radius_all(6)
-	ui.preview_panel.add_theme_stylebox_override("panel", preview_style)
-	ui.container.add_child(ui.preview_panel)
+	var close_btn := Button.new()
+	close_btn.text = "✕"
+	close_btn.pressed.connect(_close_active_popup)
+	title_row.add_child(close_btn)
 
-	ui.preview_viewport_container = SubViewportContainer.new()
-	ui.preview_viewport_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	ui.preview_viewport_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	ui.preview_viewport_container.stretch = true
-	ui.preview_panel.add_child(ui.preview_viewport_container)
+	var sep := HSeparator.new()
+	vbox.add_child(sep)
 
-	ui.preview_viewport = SubViewport.new()
-	ui.preview_viewport.size = Vector2i(400, 200)
-	ui.preview_viewport.transparent_bg = true
-	ui.preview_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	ui.preview_viewport_container.add_child(ui.preview_viewport)
+	add_child(overlay)
+	_active_popup = overlay
 
-	# --- Button row ---
+	return vbox
+
+
+func _close_active_popup() -> void:
+	if _active_popup != null and is_instance_valid(_active_popup):
+		_active_popup.queue_free()
+	_active_popup = null
+
+
+# ============================================================================
+# Node Detail Popup (generic – shows input & output with copy buttons)
+# ============================================================================
+
+func _show_node_detail_popup(spell_node: SpellGraphNode) -> void:
+	var vbox := _open_popup(spell_node.step_label)
+
+	# --- Input section ---
+	if not spell_node.input_text.is_empty():
+		var input_lbl := Label.new()
+		input_lbl.text = "Input:"
+		input_lbl.add_theme_font_size_override("font_size", 12)
+		input_lbl.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+		vbox.add_child(input_lbl)
+
+		var input_edit := TextEdit.new()
+		input_edit.text = spell_node.input_text
+		input_edit.editable = false
+		input_edit.custom_minimum_size.y = 80
+		input_edit.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		input_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+		vbox.add_child(input_edit)
+
+		var copy_in_btn := Button.new()
+		copy_in_btn.text = "Copy Input"
+		copy_in_btn.pressed.connect(func(): DisplayServer.clipboard_set(spell_node.input_text))
+		vbox.add_child(copy_in_btn)
+
+	# --- Output section ---
+	if not spell_node.result_text.is_empty():
+		var output_lbl := Label.new()
+		output_lbl.text = "Output:"
+		output_lbl.add_theme_font_size_override("font_size", 12)
+		output_lbl.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+		vbox.add_child(output_lbl)
+
+		var output_edit := TextEdit.new()
+		output_edit.text = spell_node.result_text
+		output_edit.editable = false
+		output_edit.custom_minimum_size.y = 80
+		output_edit.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		output_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+		vbox.add_child(output_edit)
+
+		var copy_out_btn := Button.new()
+		copy_out_btn.text = "Copy Output"
+		copy_out_btn.pressed.connect(func(): DisplayServer.clipboard_set(spell_node.result_text))
+		vbox.add_child(copy_out_btn)
+
+	# --- Error section ---
+	if not spell_node.error_text.is_empty():
+		var err_lbl := Label.new()
+		err_lbl.text = "Error: " + spell_node.error_text
+		err_lbl.add_theme_color_override("font_color", Color(1, 0.3, 0.3))
+		vbox.add_child(err_lbl)
+
+
+# ============================================================================
+# Human Review Popup (editable – allows changing code before compile)
+# ============================================================================
+
+func _show_human_review_popup(spell_node: SpellGraphNode) -> void:
+	var node_id := spell_node.id
+	var vbox := _open_popup("Human Review – " + spell_node.step_label, Vector2(650, 500))
+
+	var info_lbl := Label.new()
+	info_lbl.text = "Review the generated code below. Edit if needed, then press Accept."
+	info_lbl.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	info_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(info_lbl)
+
+	var code_edit := TextEdit.new()
+	code_edit.text = spell_node.result_text
+	code_edit.custom_minimum_size.y = 300
+	code_edit.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vbox.add_child(code_edit)
+
 	var btn_row := HBoxContainer.new()
-	btn_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	btn_row.add_theme_constant_override("separation", 8)
-	ui.container.add_child(btn_row)
+	vbox.add_child(btn_row)
 
-	ui.play_btn = Button.new()
-	ui.play_btn.text = "Play Effect"
-	ui.play_btn.disabled = true
-	btn_row.add_child(ui.play_btn)
-
-	ui.code_toggle_btn = Button.new()
-	ui.code_toggle_btn.text = "Show Code"
-	btn_row.add_child(ui.code_toggle_btn)
-
-	ui.recompile_btn = Button.new()
-	ui.recompile_btn.text = "Compile & Preview"
-	ui.recompile_btn.visible = false
-	btn_row.add_child(ui.recompile_btn)
-
-	# --- Error label ---
-	ui.error_label = Label.new()
-	ui.error_label.text = ""
-	ui.error_label.visible = false
-	ui.error_label.modulate = Color.RED
-	ui.error_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	ui.error_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	ui.container.add_child(ui.error_label)
-
-	# --- Code wrapper (hidden by default) ---
-	ui.code_wrapper = VBoxContainer.new()
-	ui.code_wrapper.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	ui.code_wrapper.visible = false
-	ui.container.add_child(ui.code_wrapper)
-
-	ui.code_editor = TextEdit.new()
-	ui.code_editor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	ui.code_editor.custom_minimum_size = Vector2(0, 200)
-	ui.code_editor.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
-	ui.code_editor.placeholder_text = "Generated GDScript will appear here..."
-	ui.code_wrapper.add_child(ui.code_editor)
-
-	# --- Streaming label (hidden, used to accumulate tokens) ---
-	ui.streaming_label = RichTextLabel.new()
-	ui.streaming_label.bbcode_enabled = false
-	ui.streaming_label.visible = false
-	ui.streaming_label.fit_content = true
-	ui.container.add_child(ui.streaming_label)
-
-	# --- Wire buttons ---
-	ui.code_toggle_btn.pressed.connect(func() -> void:
-		ui.code_wrapper.visible = not ui.code_wrapper.visible
-		ui.code_toggle_btn.text = "Hide Code" if ui.code_wrapper.visible else "Show Code"
+	var accept_btn := Button.new()
+	accept_btn.text = "Accept & Continue"
+	accept_btn.pressed.connect(func():
+		_on_human_review_confirmed(node_id, code_edit.text)
 	)
+	btn_row.add_child(accept_btn)
 
-	ui.recompile_btn.pressed.connect(func() -> void:
-		var code: String = ui.code_editor.text.strip_edges()
-		if code.is_empty():
-			return
-		_try_compile_and_preview_particle(code, ui)
-	)
-
-	ui.play_btn.pressed.connect(func() -> void:
-		_play_particle_preview(ui)
-	)
-
-	return ui
+	var copy_btn := Button.new()
+	copy_btn.text = "Copy Code"
+	copy_btn.pressed.connect(func(): DisplayServer.clipboard_set(code_edit.text))
+	btn_row.add_child(copy_btn)
 
 
-func _on_particle_gen_completed(text: String, ui: ParticleAssetUI, asset_key: String) -> void:
-	# Extract GDScript from the response (strip markdown fences)
-	var raw_code := _extract_gdscript(text)
+## Called when the user confirms edits in the Human Review popup.
+## Updates the review node's result and re-runs validation → compile.
+func _on_human_review_confirmed(node_id: int, new_code: String) -> void:
+	var spell_node := _node_data.get(node_id) as SpellGraphNode
+	if spell_node == null:
+		_close_active_popup()
+		return
 
-	# Run LLM sanitization pass if prompt is available
-	if not _sanitize_prompt.is_empty() and LocalLLMService.is_model_loaded():
-		_update_status("Sanitizing generated code...")
-		var sanitized := await _run_sanitize_pass(raw_code)
-		if not sanitized.is_empty():
-			raw_code = sanitized
+	spell_node.result_text = new_code
+	var ui_node := graph_editor.get_graph_node(node_id)
+	if ui_node and ui_node.has_method("refresh"):
+		ui_node.refresh()
 
-	_asset_results[asset_key] = raw_code
+	# Re-run validation → compile chain
+	var chain: Dictionary = _review_chain.get(node_id, {})
+	var validate_id: int = chain.get("validate", -1)
+	var compile_id: int = chain.get("compile", -1)
 
-	# Put code into the editor (visible so user can review before compiling)
-	ui.code_editor.text = raw_code
-	ui.code_wrapper.visible = true
-	ui.code_toggle_btn.text = "Hide Code"
-	ui.recompile_btn.visible = true
+	if validate_id >= 0:
+		_set_node_input(validate_id, new_code)
+		var result := _validate_code(new_code)
+		if result["valid"]:
+			_set_node_status(validate_id, "done", new_code)
+			if compile_id >= 0:
+				_set_node_input(compile_id, new_code)
+				_set_node_status(compile_id, "done", new_code)
+		else:
+			_set_node_status(validate_id, "error", "", result["error"])
+			if compile_id >= 0:
+				_set_node_status(compile_id, "error", "", "Upstream validation failed")
 
-	# Pre-validate: check for known bad patterns before attempting compilation
-	var validation_errors := _pre_validate_gdscript(raw_code)
-	if not validation_errors.is_empty():
-		ui.error_label.text = "Code has issues (not compiled):\n%s\nFix the code and click Compile & Preview." % "\n".join(validation_errors)
-		ui.error_label.visible = true
-		ui.play_btn.disabled = true
+	_close_active_popup()
+
+
+# ============================================================================
+# Compile & Save Preview Popup
+# ============================================================================
+
+func _show_compile_preview_popup(spell_node: SpellGraphNode) -> void:
+	var vbox := _open_popup("Compile & Save – " + spell_node.step_label, Vector2(700, 620))
+
+	var preview_ok := false
+
+	# Only attempt live preview if the node is in "done" state (passed validation)
+	if spell_node.status == "done" and not spell_node.result_text.is_empty():
+		var preview_label := Label.new()
+		preview_label.text = "Preview:"
+		preview_label.add_theme_font_size_override("font_size", 12)
+		preview_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+		vbox.add_child(preview_label)
+
+		var preview_container := SubViewportContainer.new()
+		preview_container.custom_minimum_size = Vector2(0, 280)
+		preview_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		preview_container.stretch = true
+		vbox.add_child(preview_container)
+
+		var viewport := SubViewport.new()
+		viewport.size = Vector2i(660, 280)
+		viewport.transparent_bg = false
+		viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+		preview_container.add_child(viewport)
+
+		preview_container.set_meta("effect_code", spell_node.result_text)
+		preview_container.set_meta("viewport", viewport)
+
+		preview_ok = _try_spawn_particle_preview(viewport, spell_node.result_text)
+
+		if not preview_ok:
+			var err_lbl := Label.new()
+			err_lbl.text = "Preview unavailable (runtime error in _ready)"
+			err_lbl.add_theme_color_override("font_color", Color(1.0, 0.5, 0.3))
+			err_lbl.add_theme_font_size_override("font_size", 11)
+			vbox.add_child(err_lbl)
 	else:
-		# Code looks safe to compile — try it
-		_try_compile_and_preview_particle(raw_code, ui)
+		# Node is in error state – show the error
+		if not spell_node.error_text.is_empty():
+			var err_lbl := Label.new()
+			err_lbl.text = "Validation failed: " + spell_node.error_text
+			err_lbl.add_theme_color_override("font_color", Color(1.0, 0.3, 0.3))
+			err_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			vbox.add_child(err_lbl)
 
-	_mark_row_selected(asset_key)
-	_generation_finished("Particle effect generated - review code")
+	# --- Code section ---
+	var code_text: String = spell_node.result_text if not spell_node.result_text.is_empty() else spell_node.input_text
+	if not code_text.is_empty():
+		var code_edit := TextEdit.new()
+		code_edit.text = code_text
+		code_edit.editable = false
+		code_edit.custom_minimum_size.y = 140
+		code_edit.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		vbox.add_child(code_edit)
+
+	# --- Buttons ---
+	var btn_row := HBoxContainer.new()
+	btn_row.add_theme_constant_override("separation", 8)
+	vbox.add_child(btn_row)
+
+	if not code_text.is_empty():
+		var copy_btn := Button.new()
+		copy_btn.text = "Copy Code"
+		copy_btn.pressed.connect(func(): DisplayServer.clipboard_set(code_text))
+		btn_row.add_child(copy_btn)
+
+	if preview_ok:
+		var pc := vbox.get_child(2) as SubViewportContainer  # preview_container
+		var replay_btn := Button.new()
+		replay_btn.text = "Replay Effect"
+		replay_btn.pressed.connect(func():
+			_replay_particle_preview(pc)
+		)
+		btn_row.add_child(replay_btn)
+
+
+# ============================================================================
+# Code Validation (compile-check without entering the scene tree)
+# ============================================================================
+
+## Attempt to compile the GDScript code and perform basic sanity checks.
+## Returns { "valid": bool, "error": String }.
+## This does NOT execute _ready() – it only verifies the script parses,
+## instantiates, and has the expected type / API.
+static func _validate_code(code: String) -> Dictionary:
+	if code.strip_edges().is_empty():
+		return {"valid": false, "error": "Empty code"}
+
+	if _code_has_external_refs(code):
+		return {"valid": false, "error": "Code references external files (load/preload not allowed)"}
+
+	# 1. Compile
+	var script := GDScript.new()
+	script.source_code = code
+	var err := script.reload()
+	if err != OK:
+		return {"valid": false, "error": "GDScript compile error (code %d) – invalid properties or syntax" % err}
+
+	# 2. Instantiate (does NOT call _ready; the node is never added to a tree)
+	var instance = script.new()
+	if instance == null:
+		return {"valid": false, "error": "Script instantiation failed"}
+
+	# 3. Type check
+	var is_node := instance is Node
+	if not is_node:
+		return {"valid": false, "error": "Script must extend a Node type (Node2D or Node3D)"}
+
+	var node: Node = instance as Node
+	var is_correct_type := node is Node2D or node is Node3D
+	var has_play_at := node.has_method("play_at")
+
+	# 4. Clean up (never entered the tree, so free() is safe)
+	node.free()
+
+	if not is_correct_type:
+		return {"valid": false, "error": "Script must extend Node2D or Node3D"}
+	if not has_play_at:
+		return {"valid": false, "error": "Missing required play_at() method"}
+
+	return {"valid": true, "error": ""}
+
+
+# ============================================================================
+# Particle Effect Preview (SubViewport)
+# ============================================================================
+
+## Try to dynamically load the particle GDScript, instantiate it inside the
+## given SubViewport, and trigger play_at().  Returns true on success.
+## The code should already have passed _validate_code() before reaching here.
+func _try_spawn_particle_preview(viewport: SubViewport, code: String) -> bool:
+	# Run a full validation first — this catches parse errors safely
+	# before we ever touch the scene tree.
+	var check := _validate_code(code)
+	if not check["valid"]:
+		push_warning("[SpellPreview] Pre-check failed: %s" % check["error"])
+		return false
+
+	# Safe to compile & instantiate (validation already proved this works)
+	var script := GDScript.new()
+	script.source_code = code
+	var err := script.reload()
+	if err != OK:
+		return false  # Should not happen after validation
+
+	var instance = script.new()
+	if instance == null:
+		return false
+
+	if instance is Node2D:
+		# --- 2D preview ---
+		var bg := ColorRect.new()
+		bg.name = "PreviewBG"
+		bg.color = Color(0.08, 0.08, 0.12, 1.0)
+		bg.size = Vector2(viewport.size)
+		viewport.add_child(bg)
+		viewport.add_child(instance)
+
+		# Trigger the effect after _ready() has run
+		var center := Vector2(viewport.size) / 2.0
+		get_tree().create_timer(0.1).timeout.connect(func():
+			if is_instance_valid(instance) and instance.has_method("play_at"):
+				instance.play_at(center)
+		)
+		return true
+
+	elif instance is Node3D:
+		# --- 3D preview ---
+		var cam := Camera3D.new()
+		cam.position = Vector3(0, 1.5, 4)
+		cam.look_at(Vector3.ZERO)
+		viewport.add_child(cam)
+
+		var env := WorldEnvironment.new()
+		var environment := Environment.new()
+		environment.background_mode = Environment.BG_COLOR
+		environment.background_color = Color(0.08, 0.08, 0.12)
+		environment.ambient_light_color = Color(0.4, 0.4, 0.5)
+		environment.ambient_light_energy = 0.6
+		env.environment = environment
+		viewport.add_child(env)
+
+		var light := DirectionalLight3D.new()
+		light.rotation_degrees = Vector3(-45, -45, 0)
+		viewport.add_child(light)
+
+		viewport.add_child(instance)
+
+		get_tree().create_timer(0.1).timeout.connect(func():
+			if is_instance_valid(instance) and instance.has_method("play_at"):
+				instance.play_at(Vector3.ZERO)
+		)
+		return true
+
+	else:
+		push_warning("[SpellPreview] Script instance is neither Node2D nor Node3D")
+		if instance is Node:
+			instance.queue_free()
+		return false
+
+
+## Remove the old particle instance and spawn a fresh one for replay.
+func _replay_particle_preview(container: SubViewportContainer) -> void:
+	var code: String = container.get_meta("effect_code", "")
+	var viewport: SubViewport = container.get_meta("viewport", null) as SubViewport
+	if code.is_empty() or viewport == null:
+		return
+
+	# Remove everything except the background ColorRect
+	for child in viewport.get_children():
+		if child.name == "PreviewBG":
+			continue
+		# Keep cameras, lights, environments for 3D
+		if child is Camera3D or child is DirectionalLight3D or child is WorldEnvironment:
+			continue
+		child.queue_free()
+
+	# Wait a frame for cleanup
+	await get_tree().process_frame
+
+	# Re-compile & spawn
+	var script := GDScript.new()
+	script.source_code = code
+	if script.reload() != OK:
+		return
+
+	var instance = script.new()
+	if instance == null:
+		return
+
+	viewport.add_child(instance)
+
+	get_tree().create_timer(0.1).timeout.connect(func():
+		if not is_instance_valid(instance):
+			return
+		if instance is Node2D and instance.has_method("play_at"):
+			instance.play_at(Vector2(viewport.size) / 2.0)
+		elif instance is Node3D and instance.has_method("play_at"):
+			instance.play_at(Vector3.ZERO)
+	)
+
+
+## Returns true if the code contains load/preload or file path references
+## that would crash when running in a sandboxed preview.
+static func _code_has_external_refs(code: String) -> bool:
+	# Quick regex-free check for common patterns
+	for pattern in ["load(", "preload(", 'res://', 'user://']:
+		if code.find(pattern) >= 0:
+			return true
+	return false
+
+
+# ============================================================================
+# Spell Pipeline as Graph
+# ============================================================================
+
+func _run_spell_pipeline(user_prompt: String) -> void:
+	## Layout constants – compact spacing for 8 columns.
+	## Columns: Input(0) Desc(1) Manifest(2) Gen(3) Sanitize(4) Review(5) Validate(6) Compile(7)
+	const COL_W := 155.0
+	const ROW_H := 65.0
+
+	# =====================================================================
+	# PHASE 1 — Build the first three nodes (we don't know row count yet)
+	# =====================================================================
+	var input_id := _add_graph_node(
+		SpellGraphNode.StepType.USER_INPUT, "User Prompt", "",
+		Vector2(0, 0)
+	)
+	_set_node_status(input_id, "done", user_prompt)
+
+	var desc_id := _add_graph_node(
+		SpellGraphNode.StepType.DESCRIPTION, "Description", "description",
+		Vector2(COL_W, 0)
+	)
+	_add_graph_edge(input_id, desc_id)
+
+	var manifest_id := _add_graph_node(
+		SpellGraphNode.StepType.ASSET_MANIFEST, "Manifest", "assets",
+		Vector2(COL_W * 2, 0)
+	)
+	_add_graph_edge(desc_id, manifest_id)
+
+	_center_graph_nodes()
+
+	# --- Step 1: Generate description ---
+	_set_node_input(desc_id, user_prompt)
+	_set_node_status(desc_id, "running")
+	var description := await _llm_request(
+		user_prompt,
+		_prompts.get("description", "")
+	)
+	if description.is_empty():
+		_set_node_status(desc_id, "error", "", "Generation failed")
+		_finish_generating("Description generation failed")
+		return
+	_set_node_status(desc_id, "done", description)
+
+	# --- Step 2: Generate asset manifest ---
+	_set_node_input(manifest_id, description)
+	_set_node_status(manifest_id, "running")
+	var manifest_text := await _llm_request(
+		description,
+		_prompts.get("assets", "")
+	)
+	if manifest_text.is_empty():
+		_set_node_status(manifest_id, "error", "", "Generation failed")
+		_finish_generating("Manifest generation failed")
+		return
+	_set_node_status(manifest_id, "done", manifest_text)
+
+	# --- Step 3: Parse manifest ---
+	var entries := _parse_manifest(manifest_text)
+	if entries.is_empty():
+		_set_node_status(manifest_id, "error", manifest_text, "Failed to parse manifest")
+		_finish_generating("Manifest parse failed")
+		return
+
+	# Separate shapes from particle entries
+	var shape_descriptions: PackedStringArray = []
+	var particle_entries: Array[Dictionary] = []
+
+	for entry in entries:
+		if entry["type"] == "shape":
+			shape_descriptions.append(entry["description"])
+		else:
+			particle_entries.append(entry)
+
+	# =====================================================================
+	# PHASE 2 — Create ALL downstream nodes (including Validate) at their
+	#           final positions, THEN centre the whole graph once.
+	# =====================================================================
+
+	var total_rows: int = particle_entries.size()
+	if not shape_descriptions.is_empty():
+		total_rows += 1
+	var first_row_y: float = (total_rows - 1) * ROW_H / 2.0
+
+	# Re-position the initial three nodes to the centre row
+	var input_ui := graph_editor.get_graph_node(input_id)
+	if input_ui:
+		input_ui.position = Vector2(0, first_row_y)
+	var desc_ui := graph_editor.get_graph_node(desc_id)
+	if desc_ui:
+		desc_ui.position = Vector2(COL_W, first_row_y)
+	var manifest_ui := graph_editor.get_graph_node(manifest_id)
+	if manifest_ui:
+		manifest_ui.position = Vector2(COL_W * 2, first_row_y)
+
+	## Track node IDs per row for generation phase.
+	var particle_rows: Array[Dictionary] = []
+	var row := 0
+
+	for i in range(particle_entries.size()):
+		var y: float = row * ROW_H
+
+		var gen_id := _add_graph_node(
+			SpellGraphNode.StepType.PARTICLE,
+			"Particle %d" % (i + 1), "particle",
+			Vector2(COL_W * 3, y)
+		)
+		_add_graph_edge(manifest_id, gen_id)
+
+		var san_id := _add_graph_node(
+			SpellGraphNode.StepType.SANITIZE,
+			"Sanitize P%d" % (i + 1), "sanitize",
+			Vector2(COL_W * 4, y)
+		)
+		_add_graph_edge(gen_id, san_id)
+
+		var review_id := _add_graph_node(
+			SpellGraphNode.StepType.HUMAN_REVIEW,
+			"Review P%d" % (i + 1), "",
+			Vector2(COL_W * 5, y)
+		)
+		_add_graph_edge(san_id, review_id)
+
+		var validate_id := _add_graph_node(
+			SpellGraphNode.StepType.VALIDATE,
+			"Validate P%d" % (i + 1), "",
+			Vector2(COL_W * 6, y)
+		)
+		_add_graph_edge(review_id, validate_id)
+
+		var compile_id := _add_graph_node(
+			SpellGraphNode.StepType.COMPILE_SAVE,
+			"Compile P%d" % (i + 1), "",
+			Vector2(COL_W * 7, y)
+		)
+		_add_graph_edge(validate_id, compile_id)
+		_review_chain[review_id] = {"validate": validate_id, "compile": compile_id}
+
+		particle_rows.append({
+			"gen": gen_id, "san": san_id,
+			"review": review_id, "validate": validate_id, "compile": compile_id,
+			"description": particle_entries[i]["description"],
+		})
+		row += 1
+
+	# Shape row (if any)
+	var shape_ids: Dictionary = {}
+	if not shape_descriptions.is_empty():
+		var y: float = row * ROW_H
+		var combined := ""
+		for sd in shape_descriptions:
+			combined += "- %s\n" % sd
+		combined = combined.strip_edges()
+
+		var shape_gen_id := _add_graph_node(
+			SpellGraphNode.StepType.SHAPE,
+			"Shapes (%d)" % shape_descriptions.size(), "shape",
+			Vector2(COL_W * 3, y)
+		)
+		_add_graph_edge(manifest_id, shape_gen_id)
+
+		var shape_san_id := _add_graph_node(
+			SpellGraphNode.StepType.SANITIZE,
+			"Sanitize S", "sanitize",
+			Vector2(COL_W * 4, y)
+		)
+		_add_graph_edge(shape_gen_id, shape_san_id)
+
+		var shape_review_id := _add_graph_node(
+			SpellGraphNode.StepType.HUMAN_REVIEW,
+			"Review S", "",
+			Vector2(COL_W * 5, y)
+		)
+		_add_graph_edge(shape_san_id, shape_review_id)
+
+		var shape_validate_id := _add_graph_node(
+			SpellGraphNode.StepType.VALIDATE,
+			"Validate S", "",
+			Vector2(COL_W * 6, y)
+		)
+		_add_graph_edge(shape_review_id, shape_validate_id)
+
+		var shape_compile_id := _add_graph_node(
+			SpellGraphNode.StepType.COMPILE_SAVE,
+			"Compile S", "",
+			Vector2(COL_W * 7, y)
+		)
+		_add_graph_edge(shape_validate_id, shape_compile_id)
+		_review_chain[shape_review_id] = {"validate": shape_validate_id, "compile": shape_compile_id}
+
+		shape_ids = {
+			"gen": shape_gen_id, "san": shape_san_id,
+			"review": shape_review_id, "validate": shape_validate_id,
+			"compile": shape_compile_id, "combined": combined,
+		}
+
+	# One single centre pass for the complete graph
+	_center_graph_nodes()
+
+	# =====================================================================
+	# PHASE 3 — Run generation sequentially.  Each chain now includes a
+	#           validation step that compile-checks the code before the
+	#           Compile & Save node is marked done.
+	# =====================================================================
+
+	for pr in particle_rows:
+		var gen_id: int = pr["gen"]
+		var san_id: int = pr["san"]
+		var review_id: int = pr["review"]
+		var validate_id: int = pr["validate"]
+		var compile_id: int = pr["compile"]
+		var p_desc: String = pr["description"]
+
+		# --- Particle Generation ---
+		_set_node_input(gen_id, p_desc)
+		_set_node_status(gen_id, "running")
+		_update_status("Generating particle...")
+		var raw_code := await _llm_request(p_desc, _prompts.get("particle", ""))
+		if raw_code.is_empty():
+			_set_node_status(gen_id, "error", "", "Generation failed")
+			continue
+		raw_code = _extract_gdscript(raw_code)
+		_set_node_status(gen_id, "done", raw_code)
+
+		# --- Sanitize ---
+		_set_node_input(san_id, raw_code)
+		_set_node_status(san_id, "running")
+		_update_status("Sanitizing particle...")
+		var sanitized := await _sanitize_code(raw_code)
+		_set_node_status(san_id, "done", sanitized)
+
+		# --- Auto-complete Human Review ---
+		_set_node_input(review_id, sanitized)
+		_set_node_status(review_id, "done", sanitized)
+
+		# --- Validate (compile-check) ---
+		_set_node_input(validate_id, sanitized)
+		_set_node_status(validate_id, "running")
+		_update_status("Validating particle...")
+		var vresult := _validate_code(sanitized)
+		if vresult["valid"]:
+			_set_node_status(validate_id, "done", sanitized)
+			_set_node_input(compile_id, sanitized)
+			_set_node_status(compile_id, "done", sanitized)
+		else:
+			_set_node_status(validate_id, "error", "", vresult["error"])
+			_set_node_status(compile_id, "error", "", "Upstream validation failed")
+
+	# --- Shape generation ---
+	if not shape_ids.is_empty():
+		var sg: int = shape_ids["gen"]
+		var ss: int = shape_ids["san"]
+		var sr: int = shape_ids["review"]
+		var sv: int = shape_ids["validate"]
+		var sc: int = shape_ids["compile"]
+		var combined: String = shape_ids["combined"]
+
+		_set_node_input(sg, combined)
+		_set_node_status(sg, "running")
+		_update_status("Generating shapes...")
+		var raw_shape := await _llm_request(combined, _prompts.get("shape", ""))
+		if raw_shape.is_empty():
+			_set_node_status(sg, "error", "", "Generation failed")
+		else:
+			raw_shape = _extract_gdscript(raw_shape)
+			_set_node_status(sg, "done", raw_shape)
+
+			_set_node_input(ss, raw_shape)
+			_set_node_status(ss, "running")
+			_update_status("Sanitizing shapes...")
+			var sanitized_shape := await _sanitize_code(raw_shape)
+			_set_node_status(ss, "done", sanitized_shape)
+
+			_set_node_input(sr, sanitized_shape)
+			_set_node_status(sr, "done", sanitized_shape)
+
+			# --- Validate shapes ---
+			_set_node_input(sv, sanitized_shape)
+			_set_node_status(sv, "running")
+			var sv_result := _validate_code(sanitized_shape)
+			if sv_result["valid"]:
+				_set_node_status(sv, "done", sanitized_shape)
+				_set_node_input(sc, sanitized_shape)
+				_set_node_status(sc, "done", sanitized_shape)
+			else:
+				_set_node_status(sv, "error", "", sv_result["error"])
+				_set_node_status(sc, "error", "", "Upstream validation failed")
+
+	_finish_generating("Pipeline complete – click any node to inspect")
+
+
+# ============================================================================
+# Code Utilities
+# ============================================================================
+
+func _sanitize_code(code: String) -> String:
+	var sanitize_prompt: String = _prompts.get("sanitize", "")
+	if sanitize_prompt.is_empty() or not LocalLLMService.is_model_loaded():
+		return code
+	var sanitized := await _llm_generate(code, sanitize_prompt, {
+		"max_tokens": 1536, "temperature": 0.1
+	})
+	sanitized = _extract_gdscript(sanitized)
+	if sanitized.strip_edges().is_empty():
+		return code
+	return sanitized
 
 
 func _extract_gdscript(text: String) -> String:
-	# Strip markdown code fences if the LLM wrapped it
 	var result := text.strip_edges()
-
-	# Handle ```gdscript\n...\n```
 	if result.begins_with("```gdscript"):
 		result = result.substr(len("```gdscript")).strip_edges()
 	elif result.begins_with("```gd"):
 		result = result.substr(len("```gd")).strip_edges()
 	elif result.begins_with("```"):
 		result = result.substr(3).strip_edges()
-
 	if result.ends_with("```"):
 		result = result.substr(0, result.length() - 3).strip_edges()
-
 	return result
 
 
-func _run_sanitize_pass(code: String) -> String:
-	## Send code through the LLM sanitization prompt to fix Godot 3→4 issues.
-	## Returns sanitized code, or empty string if sanitization fails.
-	var result := await LocalLLMService.generate(code, {
-		"system_prompt": _sanitize_prompt,
-		"max_tokens": 1536,
-		"temperature": 0.1
-	})
+func _parse_manifest(manifest_text: String) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	var json_text := manifest_text
+	var start := json_text.find("[")
+	var end := json_text.rfind("]")
+	if start >= 0 and end > start:
+		json_text = json_text.substr(start, end - start + 1)
 
-	if result.get("success", false):
-		var sanitized: String = result.get("text", "")
-		sanitized = _extract_gdscript(sanitized)  # Strip fences if LLM added them
-		if not sanitized.strip_edges().is_empty():
-			return sanitized
+	var json := JSON.new()
+	if json.parse(json_text) != OK:
+		return result
 
-	return ""
+	var data = json.get_data()
+	if not data is Array:
+		return result
 
-
-func _pre_validate_gdscript(code: String) -> Array[String]:
-	## Quick static checks for known bad patterns that would crash script.reload()
-	var errors: Array[String] = []
-
-	if code.strip_edges().is_empty():
-		errors.append("Code is empty")
-		return errors
-
-	# Check for remaining Godot 3.x connect syntax
-	if code.contains('.connect("') and code.contains(', self,'):
-		errors.append("Old Godot 3.x connect() syntax detected — use signal.connect(callable)")
-
-	# Check for yield (Godot 3)
-	if code.contains("yield("):
-		errors.append("yield() is Godot 3.x syntax — use 'await' instead")
-
-	# Check for old-style export
-	var export_regex := RegEx.new()
-	export_regex.compile("^export\\(")
-	if export_regex.search(code) != null:
-		errors.append("export() is Godot 3.x syntax — use @export")
-
-	# Check for missing extends
-	var has_extends := false
-	for line in code.split("\n"):
-		var stripped := line.strip_edges()
-		if stripped.begins_with("extends "):
-			has_extends = true
-			break
-	if not has_extends:
-		errors.append("Missing 'extends' declaration")
-
-	return errors
-
-
-func _try_compile_and_preview_particle(source_code: String, ui: ParticleAssetUI) -> void:
-	ui.error_label.visible = false
-	ui.error_label.text = ""
-	_cleanup_preview()
-
-	# Final pre-validation before calling reload() (which can trigger editor debugger)
-	var pre_errors := _pre_validate_gdscript(source_code)
-	if not pre_errors.is_empty():
-		ui.error_label.text = "Cannot compile — fix these issues first:\n%s" % "\n".join(pre_errors)
-		ui.error_label.visible = true
-		ui.code_wrapper.visible = true
-		ui.code_toggle_btn.text = "Hide Code"
-		ui.play_btn.disabled = true
-		return
-
-	# Compile the GDScript
-	var script := GDScript.new()
-	script.source_code = source_code
-	var err := script.reload()
-
-	if err != OK:
-		ui.error_label.text = "Compilation failed (error %d). Edit the code and click Compile & Preview." % err
-		ui.error_label.visible = true
-		ui.code_wrapper.visible = true
-		ui.code_toggle_btn.text = "Hide Code"
-		ui.play_btn.disabled = true
-		return
-
-	# Instantiate the scene into the SubViewport
-	var instance: Node = script.new()
-	if instance == null:
-		ui.error_label.text = "Failed to instantiate script."
-		ui.error_label.visible = true
-		ui.play_btn.disabled = true
-		return
-
-	ui.preview_viewport.add_child(instance)
-	_preview_instance = instance
-	ui.play_btn.disabled = false
-	ui.error_label.visible = false
-
-
-func _play_particle_preview(ui: ParticleAssetUI) -> void:
-	if _preview_instance == null or not is_instance_valid(_preview_instance):
-		ui.error_label.text = "No particle instance to play."
-		ui.error_label.visible = true
-		return
-
-	# Call play_at if available
-	if _preview_instance.has_method("play_at"):
-		# Center in the viewport
-		var vp_size := ui.preview_viewport.size
-		if _preview_instance is Node2D:
-			_preview_instance.call("play_at", Vector2(vp_size.x / 2, vp_size.y / 2))
-		elif _preview_instance is Node3D:
-			_preview_instance.call("play_at", Vector3.ZERO)
-		else:
-			_preview_instance.call("play_at", Vector2(vp_size.x / 2, vp_size.y / 2))
-	else:
-		ui.error_label.text = "Script has no play_at() method."
-		ui.error_label.visible = true
+	for entry in data:
+		if entry is Dictionary:
+			result.append({
+				"type": str(entry.get("type", "unknown")),
+				"description": str(entry.get("description", ""))
+			})
+	return result

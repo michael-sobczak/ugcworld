@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3 uid="uid://spell_graph_link_ui"]
+
+[ext_resource type="Script" path="res://client/scripts/spell_graph/SpellGraphLinkUI.gd" id="1_script"]
+[ext_resource type="Texture2D" uid="uid://bh6h1wt124yom" path="res://addons/custom_graph_editor/images/arrow_right-white.svg" id="2_arrow"]
+
+[node name="SpellGraphLink" type="Control"]
+layout_mode = 3
+anchors_preset = 0
+mouse_filter = 1
+script = ExtResource("1_script")
+arrow_texture = ExtResource("2_arrow")

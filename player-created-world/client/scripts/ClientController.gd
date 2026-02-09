@@ -54,6 +54,7 @@ var model_selection_dialog: Node = null
 var spell_creation_screen: Node = null
 
 ## State
+var camera_controls_enabled: bool = true
 var _mouse_captured: bool = false
 var _camera_rotation: Vector2 = Vector2.ZERO
 var _dragging_left: bool = false
@@ -302,6 +303,8 @@ func _on_spell_cast_failed(spell_id: String, error: String) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if not camera_controls_enabled:
+		return
 	if event is InputEventMouseButton:
 		var mouse_event := event as InputEventMouseButton
 		if mouse_event.button_index == MOUSE_BUTTON_LEFT:
@@ -368,6 +371,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
+	if not camera_controls_enabled:
+		return
 	_handle_camera_movement(delta)
 	_apply_camera_smoothing(delta)
 

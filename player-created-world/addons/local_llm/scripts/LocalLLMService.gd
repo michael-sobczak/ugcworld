@@ -249,15 +249,15 @@ func load_model(model_id: String) -> Dictionary:
 	_debug_log("H4", "load_model_extract_ok", {"model_path": model_path})
 	
 	# Determine context length.
-	# models.json stores the model's *maximum* context (e.g. 163840).
-	# Allocating full context eats tens of GB of KV-cache RAM, so we cap
-	# to a sane default unless the user explicitly configured a value.
-	const MAX_DEFAULT_CONTEXT := 4096
+	# If the user configured a specific value in settings, use that.
+	# Otherwise default to the model's maximum context window.
 	var context_len: int = _settings.context_length
 	if context_len <= 0:
 		var model_max: int = model_info.get("context_length", 4096)
-		context_len = mini(model_max, MAX_DEFAULT_CONTEXT)
-		_log("Context length: using %d (model max %d, cap %d)" % [context_len, model_max, MAX_DEFAULT_CONTEXT])
+		context_len = model_max
+		_log("Context length: using model max %d" % context_len)
+	else:
+		_log("Context length: using configured value %d" % context_len)
 	
 	var n_threads = _settings.n_threads
 	if n_threads <= 0:

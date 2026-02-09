@@ -13,7 +13,7 @@ var selected_model_id: String = ""
 ## Number of CPU threads to use (0 = auto-detect)
 var n_threads: int = 0
 
-## Context length (0 = use model default)
+## Context length (0 = use model maximum)
 var context_length: int = 0
 
 ## Number of GPU layers to offload (0 = CPU only)

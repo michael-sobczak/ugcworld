@@ -1,27 +1,29 @@
-[gd_scene load_steps=2 format=3 uid="uid://spell_creation_screen"]
+[gd_scene load_steps=6 format=3 uid="uid://spell_creation_screen"]
 
 [ext_resource type="Script" path="res://client/scripts/SpellCreationScreen.gd" id="1_script"]
+[ext_resource type="PackedScene" uid="uid://ca3bvai5fvsfx" path="res://addons/custom_graph_editor/graph_editor.tscn" id="2_graph_editor"]
+[ext_resource type="Script" path="res://client/scripts/spell_graph/SpellGraphNode.gd" id="3_spell_node"]
+[ext_resource type="PackedScene" uid="uid://spell_graph_node_ui" path="res://client/scenes/spell_graph/SpellGraphNodeUI.tscn" id="4_spell_node_ui"]
+[ext_resource type="PackedScene" uid="uid://spell_graph_link_ui" path="res://client/scenes/spell_graph/SpellGraphLinkUI.tscn" id="5_spell_link_ui"]
 
 [node name="SpellCreationScreen" type="CanvasLayer"]
 layer = 11
 script = ExtResource("1_script")
 
 [node name="Panel" type="PanelContainer" parent="."]
-anchors_preset = 3
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -320.0
-offset_top = -220.0
-offset_right = 320.0
-offset_bottom = 220.0
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 40.0
+offset_top = 40.0
+offset_right = -40.0
+offset_bottom = -40.0
 grow_horizontal = 2
 grow_vertical = 2
 
 [node name="VBox" type="VBoxContainer" parent="Panel"]
 layout_mode = 2
-theme_override_constants/separation = 12
+theme_override_constants/separation = 8
 
 [node name="Header" type="HBoxContainer" parent="Panel/VBox"]
 layout_mode = 2
@@ -43,7 +45,7 @@ layout_mode = 2
 layout_mode = 2
 
 [node name="InputField" type="TextEdit" parent="Panel/VBox/InputContainer"]
-custom_minimum_size = Vector2(0, 90)
+custom_minimum_size = Vector2(0, 60)
 layout_mode = 2
 size_flags_horizontal = 3
 placeholder_text = "Describe the spell you want to create (Enter to send)"
@@ -57,16 +59,22 @@ text = "Send"
 [node name="Separator2" type="HSeparator" parent="Panel/VBox"]
 layout_mode = 2
 
-[node name="OutputScroll" type="ScrollContainer" parent="Panel/VBox"]
-layout_mode = 2
-size_flags_vertical = 3
-horizontal_scroll_mode = 0
-
-[node name="OutputRoot" type="VBoxContainer" parent="Panel/VBox/OutputScroll"]
+[node name="GraphContainer" type="Control" parent="Panel/VBox"]
+custom_minimum_size = Vector2(0, 300)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-theme_override_constants/separation = 12
+
+[node name="SpellGraph" parent="Panel/VBox/GraphContainer" instance=ExtResource("2_graph_editor")]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+graph_node_ui_scene = ExtResource("4_spell_node_ui")
+graph_link_ui_scene = ExtResource("5_spell_link_ui")
+node_class = ExtResource("3_spell_node")
 
 [node name="StatusBar" type="HBoxContainer" parent="Panel/VBox"]
 layout_mode = 2
