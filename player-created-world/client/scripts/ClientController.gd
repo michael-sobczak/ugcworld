@@ -6,6 +6,7 @@ extends Node
 ## Controls:
 ## - C or Enter: Open connection dialog (choose localhost/production/custom)
 ## - W: Open world selection dialog (when connected but not in a world)
+## - S: Open spell creation model selection dialog
 ## - 1: Cast create_land spell (legacy voxel op)
 ## - 2: Cast dig spell (legacy voxel op)
 ## - 3: Cast demo_spark spell (new spell system)
@@ -49,6 +50,8 @@ var spell_cast: Node = null
 var spell_registry: Node = null
 var connection_dialog: Node = null
 var world_selection_dialog: Node = null
+var model_selection_dialog: Node = null
+var spell_creation_screen: Node = null
 
 ## State
 var _mouse_captured: bool = false
@@ -90,6 +93,13 @@ func _ready() -> void:
 	world_selection_dialog = get_node_or_null("../WorldSelectionDialog")
 	if world_selection_dialog:
 		world_selection_dialog.world_selected.connect(_on_world_selected)
+	
+	# Find spell creation UI in scene
+	model_selection_dialog = get_node_or_null("../ModelSelectionDialog")
+	if model_selection_dialog:
+		model_selection_dialog.model_selected.connect(_on_model_selected)
+	
+	spell_creation_screen = get_node_or_null("../SpellCreationScreen")
 	
 	# Connect to network signals
 	if net_node:
@@ -171,6 +181,24 @@ func _show_world_selection_dialog() -> void:
 		print("[Client] No world selection dialog found")
 
 
+func _show_model_selection_dialog() -> void:
+	"""Show the model selection dialog for spell creation."""
+	if model_selection_dialog:
+		_release_mouse()
+		model_selection_dialog.show_dialog()
+	else:
+		print("[Client] No model selection dialog found")
+
+
+func _on_model_selected(model_id: String) -> void:
+	print("[Client] Model loaded for spell creation: ", model_id)
+	if spell_creation_screen:
+		_release_mouse()
+		spell_creation_screen.show_screen(model_id)
+	else:
+		print("[Client] No spell creation screen found")
+
+
 func _on_connection_url_requested(url: String) -> void:
 	"""Handle connection request from dialog."""
 	if net_node:
@@ -204,13 +232,16 @@ func _on_disconnected() -> void:
 	print("[Client] Disconnected from backend.")
 
 
-func _on_connection_failed() -> void:
-	print("[Client] Failed to connect to backend. Is the server running?")
-	print("[Client] Start backend with: cd ugc_backend && python app_socketio.py")
+func _on_connection_failed(reason: String = "") -> void:
+	var message := reason
+	if message.is_empty():
+		message = "Connection failed. Is the server running?"
+	
+	print("[Client] Failed to connect to backend: ", message)
 	
 	# Notify dialog of failure
 	if connection_dialog:
-		connection_dialog.show_error("Connection failed. Is the server running?")
+		connection_dialog.show_error(message)
 
 
 func _on_world_selected(world_id: String) -> void:
@@ -324,6 +355,12 @@ func _unhandled_input(event: InputEvent) -> void:
 				_publish_spell("demo_spark")
 			KEY_8:
 				_publish_spell("demo_spawn")
+			KEY_S:
+				if spell_creation_screen and spell_creation_screen.visible:
+					return
+				if model_selection_dialog and model_selection_dialog.visible:
+					return
+				_show_model_selection_dialog()
 			KEY_ESCAPE:
 				_release_mouse()
 			KEY_R:

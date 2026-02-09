@@ -1,0 +1,1 @@
+{"data":{"error":"Failed to load model - check logs for details","model_id":"deepseek-coder-v2"},"hypothesisId":"H5","id":"H5_load_model_failed_provider_31010","location":"LocalLLMService.gd","message":"load_model_failed_provider","runId":"spell_model_load","timestamp":31010}

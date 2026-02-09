@@ -1,0 +1,79 @@
+[gd_scene load_steps=2 format=3 uid="uid://spell_creation_screen"]
+
+[ext_resource type="Script" path="res://client/scripts/SpellCreationScreen.gd" id="1_script"]
+
+[node name="SpellCreationScreen" type="CanvasLayer"]
+layer = 11
+script = ExtResource("1_script")
+
+[node name="Panel" type="PanelContainer" parent="."]
+anchors_preset = 3
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -320.0
+offset_top = -220.0
+offset_right = 320.0
+offset_bottom = 220.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="Panel"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Header" type="HBoxContainer" parent="Panel/VBox"]
+layout_mode = 2
+
+[node name="Title" type="Label" parent="Panel/VBox/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 18
+text = "Spell Creation"
+
+[node name="CloseButton" type="Button" parent="Panel/VBox/Header"]
+layout_mode = 2
+text = "✕"
+
+[node name="Separator1" type="HSeparator" parent="Panel/VBox"]
+layout_mode = 2
+
+[node name="InputContainer" type="HBoxContainer" parent="Panel/VBox"]
+layout_mode = 2
+
+[node name="InputField" type="TextEdit" parent="Panel/VBox/InputContainer"]
+custom_minimum_size = Vector2(0, 90)
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Describe the spell you want to create (Enter to send)"
+wrap_mode = 1
+
+[node name="SendButton" type="Button" parent="Panel/VBox/InputContainer"]
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+text = "Send"
+
+[node name="Separator2" type="HSeparator" parent="Panel/VBox"]
+layout_mode = 2
+
+[node name="OutputScroll" type="ScrollContainer" parent="Panel/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="OutputRoot" type="VBoxContainer" parent="Panel/VBox/OutputScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+
+[node name="StatusBar" type="HBoxContainer" parent="Panel/VBox"]
+layout_mode = 2
+
+[node name="StatusLabel" type="Label" parent="Panel/VBox/StatusBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.6, 0.6, 0.6, 1)
+theme_override_font_sizes/font_size = 12
+text = "Model: None"

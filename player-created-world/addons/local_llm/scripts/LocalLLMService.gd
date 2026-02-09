@@ -51,10 +51,14 @@ var _provider  # LlamaCppProvider - dynamically typed to handle missing extensio
 var _is_ready: bool = false
 var _init_error: String = ""
 var _extension_available: bool = false
+const _DEBUG_RUN_ID := "spell_model_load"
+var _debug_log_path: String = ""
 
 
 func _ready() -> void:
 	_log("Initializing LocalLLMService...")
+	_debug_log_path = _resolve_debug_log_path()
+	_debug_log("H1", "service_ready_start", {"debug_log_path": _debug_log_path})
 	
 	# Check if the GDExtension is loaded
 	_extension_available = ClassDB.class_exists("LlamaCppProvider")
@@ -63,6 +67,7 @@ func _ready() -> void:
 		_init_error = "LlamaCppProvider GDExtension not loaded. Build the extension first using scripts/build_llm_win.ps1 or scripts/build_llm_linux.sh"
 		_log_error(_init_error)
 		_log_warning("LocalLLMService running in stub mode - no LLM functionality available")
+		_debug_log("H1", "extension_missing", {"init_error": _init_error})
 	
 	# Initialize components (these work without the extension)
 	_registry = ModelRegistry.new()
@@ -84,21 +89,28 @@ func _ready() -> void:
 	var err = _registry.load_registry()
 	if err != OK:
 		_log_warning("No models.json found - no embedded models available")
+		_debug_log("H2", "registry_load_failed", {"error_code": err})
 	
 	_is_ready = _extension_available
 	
 	if _is_ready:
 		_log("LocalLLMService ready. Available models: %d" % _registry.get_model_count())
+		_debug_log("H2", "service_ready", {
+			"models_count": _registry.get_model_count(),
+			"selected_model_id": _settings.selected_model_id
+		})
 		
-		# Auto-load model on startup:
-		# 1. If user has a previously selected model, load that
-		# 2. Otherwise, load the default model (tagged with "default" in models.json)
-		if not _settings.selected_model_id.is_empty():
+		# Auto-load model on startup only if the user opted in
+		if _settings.auto_load_last_model and not _settings.selected_model_id.is_empty():
+			_debug_log("H3", "auto_load_last_model", {"model_id": _settings.selected_model_id})
 			call_deferred("_auto_load_model")
-		elif _registry.get_model_count() > 0:
-			call_deferred("_auto_load_default_model")
+		else:
+			_log("Skipping auto-load (auto_load_last_model=%s, selected=%s)" % [
+				str(_settings.auto_load_last_model), _settings.selected_model_id
+			])
 	else:
 		_log("LocalLLMService initialized (extension not available)")
+		_debug_log("H1", "service_not_ready", {"extension_available": _extension_available})
 
 
 func _exit_tree() -> void:
@@ -112,20 +124,26 @@ func _auto_load_model() -> void:
 	var model_info = _registry.get_model(_settings.selected_model_id)
 	if model_info != null and not model_info.is_empty():
 		_log("Auto-loading last used model: %s" % _settings.selected_model_id)
+		_debug_log("H3", "auto_load_model_start", {"model_id": _settings.selected_model_id})
 		await load_model(_settings.selected_model_id)
+	else:
+		_debug_log("H3", "auto_load_model_missing_info", {"model_id": _settings.selected_model_id})
 
 
 func _auto_load_default_model() -> void:
 	var default_model = _registry.get_default_model()
 	if default_model.is_empty():
 		_log("No default model found to auto-load")
+		_debug_log("H3", "auto_load_default_missing", {})
 		return
 	
 	var model_id = default_model.get("id", "")
 	if model_id.is_empty():
+		_debug_log("H3", "auto_load_default_empty_id", {})
 		return
 	
 	_log("Auto-loading default model: %s" % model_id)
+	_debug_log("H3", "auto_load_default_start", {"model_id": model_id})
 	await load_model(model_id)
 
 
@@ -190,39 +208,56 @@ func list_models() -> Array[Dictionary]:
 ## Extracts from PCK if needed and loads into memory
 func load_model(model_id: String) -> Dictionary:
 	if _provider == null:
+		_debug_log("H1", "load_model_no_provider", {"model_id": model_id})
 		return {"success": false, "error": "Provider not initialized - extension not loaded"}
 	
 	var model_info = _registry.get_model(model_id)
 	if model_info == null or model_info.is_empty():
+		_debug_log("H2", "load_model_missing_info", {"model_id": model_id})
 		return {"success": false, "error": "Model not found: %s" % model_id}
 	
 	model_loading.emit(model_id)
 	_log("Loading model: %s" % model_id)
+	_debug_log("H3", "load_model_start", {
+		"model_id": model_id,
+		"provider_loaded": _provider.is_loaded(),
+		"loaded_model_id": _provider.get_loaded_model_id()
+	})
 	
 	# Check memory requirements
 	var required_mem = model_info.get("estimated_memory", model_info.get("size_bytes", 0) * 1.2)
 	var available_mem = _provider.get_available_memory()
+	_debug_log("H3", "load_model_memory_check", {"required_mem": required_mem, "available_mem": available_mem})
 	
 	if required_mem > available_mem * 0.9:  # Leave 10% headroom
 		var error = "Insufficient memory. Required: %.1f GB, Available: %.1f GB" % [
 			required_mem / 1073741824.0,
 			available_mem / 1073741824.0
 		]
+		_debug_log("H3", "load_model_insufficient_memory", {"error": error})
 		model_load_failed.emit(model_id, error)
 		return {"success": false, "error": error}
 	
 	# Extract model if needed
 	var extract_result = await _extractor.ensure_extracted(model_info)
 	if not extract_result.success:
+		_debug_log("H4", "load_model_extract_failed", {"error": extract_result.error})
 		model_load_failed.emit(model_id, extract_result.error)
 		return {"success": false, "error": extract_result.error}
 	
 	var model_path = extract_result.path
+	_debug_log("H4", "load_model_extract_ok", {"model_path": model_path})
 	
-	# Determine settings
-	var context_len = _settings.context_length
+	# Determine context length.
+	# models.json stores the model's *maximum* context (e.g. 163840).
+	# Allocating full context eats tens of GB of KV-cache RAM, so we cap
+	# to a sane default unless the user explicitly configured a value.
+	const MAX_DEFAULT_CONTEXT := 4096
+	var context_len: int = _settings.context_length
 	if context_len <= 0:
-		context_len = model_info.get("context_length", 4096)
+		var model_max: int = model_info.get("context_length", 4096)
+		context_len = mini(model_max, MAX_DEFAULT_CONTEXT)
+		_log("Context length: using %d (model max %d, cap %d)" % [context_len, model_max, MAX_DEFAULT_CONTEXT])
 	
 	var n_threads = _settings.n_threads
 	if n_threads <= 0:
@@ -232,8 +267,16 @@ func load_model(model_id: String) -> Dictionary:
 	if not _provider.is_gpu_available():
 		n_gpu_layers = 0
 	
+	_debug_log("H3", "load_model_settings", {
+		"context_len": context_len,
+		"n_threads": n_threads,
+		"n_gpu_layers": n_gpu_layers,
+		"gpu_available": _provider.is_gpu_available()
+	})
+	
 	# Unload current model if any
 	if _provider.is_loaded():
+		_debug_log("H3", "load_model_unload_existing", {"loaded_model_id": _provider.get_loaded_model_id()})
 		_provider.unload_model()
 		model_unloaded.emit()
 	
@@ -247,6 +290,7 @@ func load_model(model_id: String) -> Dictionary:
 	)
 	
 	if success:
+		_debug_log("H5", "load_model_success", {"model_id": model_id})
 		_settings.selected_model_id = model_id
 		_settings.save_settings()
 		model_loaded.emit(model_id)
@@ -254,8 +298,51 @@ func load_model(model_id: String) -> Dictionary:
 		return {"success": true}
 	else:
 		var error = "Failed to load model - check logs for details"
+		_debug_log("H5", "load_model_failed_provider", {"model_id": model_id, "error": error})
 		model_load_failed.emit(model_id, error)
 		return {"success": false, "error": error}
+
+
+func _debug_log(hypothesis_id: String, message: String, data: Dictionary) -> void:
+	# region agent log
+	if _debug_log_path.is_empty():
+		return
+	var payload := {
+		"id": "%s_%s_%d" % [hypothesis_id, message, Time.get_ticks_msec()],
+		"timestamp": Time.get_ticks_msec(),
+		"location": "LocalLLMService.gd",
+		"message": message,
+		"data": data,
+		"runId": _DEBUG_RUN_ID,
+		"hypothesisId": hypothesis_id
+	}
+	var file := FileAccess.open(_debug_log_path, FileAccess.WRITE_READ)
+	if file != null:
+		file.seek_end()
+		file.store_line(JSON.stringify(payload))
+		file.close()
+	# endregion agent log
+
+
+func _resolve_debug_log_path() -> String:
+	var project_root := ProjectSettings.globalize_path("res://")
+	var repo_root := project_root.get_base_dir()
+	var config_path := repo_root.path_join("debug_config.json")
+	
+	if FileAccess.file_exists(config_path):
+		var file := FileAccess.open(config_path, FileAccess.READ)
+		if file != null:
+			var text := file.get_as_text()
+			file.close()
+			
+			var json := JSON.new()
+			var parse_err := json.parse(text)
+			if parse_err == OK and json.data is Dictionary:
+				var value_str: String = String(json.data.get("debug_log_path", ""))
+				if not value_str.is_empty():
+					return value_str
+	
+	return ProjectSettings.globalize_path("user://debug.log")
 
 
 ## Unload the current model

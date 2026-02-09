@@ -436,10 +436,11 @@ func _on_http_completed(result: int, response_code: int, _headers: PackedStringA
 	_pending_request = ""
 	
 	if result != HTTPRequest.RESULT_SUCCESS:
-		push_error("[Net] HTTP request failed: %d" % result)
+		var reason := _http_result_to_message(result)
+		push_warning("[Net] HTTP request failed: %s" % reason)
 		if state == State.AUTHENTICATING:
 			state = State.DISCONNECTED
-			connection_failed.emit("HTTP request failed")
+			connection_failed.emit(reason)
 		return
 	
 	var json := JSON.new()
@@ -452,7 +453,7 @@ func _on_http_completed(result: int, response_code: int, _headers: PackedStringA
 	
 	if response_code >= 400:
 		var error_msg: String = data.get("error", "Request failed")
-		push_error("[Net] HTTP %d: %s" % [response_code, error_msg])
+		push_warning("[Net] HTTP %d: %s" % [response_code, error_msg])
 		if state == State.AUTHENTICATING:
 			state = State.DISCONNECTED
 			connection_failed.emit(error_msg)
@@ -491,3 +492,19 @@ func _on_http_completed(result: int, response_code: int, _headers: PackedStringA
 		
 		"worlds":
 			world_list_received.emit(data.get("worlds", []))
+
+
+func _http_result_to_message(result: int) -> String:
+	match result:
+		HTTPRequest.RESULT_CANT_CONNECT:
+			return "Server unreachable (can't connect)"
+		HTTPRequest.RESULT_CANT_RESOLVE:
+			return "Server unreachable (can't resolve host)"
+		HTTPRequest.RESULT_CONNECTION_ERROR:
+			return "Server connection error"
+		HTTPRequest.RESULT_TIMEOUT:
+			return "Server timed out"
+		HTTPRequest.RESULT_TLS_HANDSHAKE_ERROR:
+			return "TLS handshake failed"
+		_:
+			return "HTTP request failed (result=%d)" % result

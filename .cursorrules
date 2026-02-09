@@ -42,6 +42,11 @@ ALWAYS read these before making changes:
 3. **When adding features**: Document the feature in the appropriate markdown file
 4. **When changing APIs**: Update the relevant README with new events/endpoints
 
+### Debug Logging Configuration
+
+- Do not hardcode local absolute paths for debug logging in client or server code.
+- Read debug log paths from `debug_config.json` at the repo root.
+
 ### Production and Localhost Compatibility
 
 All server/client code MUST work in both contexts:

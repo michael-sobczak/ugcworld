@@ -2,10 +2,12 @@
 
 [ext_resource type="Script" uid="uid://bigwr4rd7dcbm" path="res://client/scripts/ClientController.gd" id="1_client"]
 [ext_resource type="Script" path="res://shared/scripts/world/VoxelBackend.gd" id="2_voxel"]
-[ext_resource type="Script" path="res://client/scripts/GlbShowcase.gd" id="6_glb_showcase"]
 [ext_resource type="PackedScene" uid="uid://cbgwn5ggkciuq" path="res://client/scenes/LLMChatHUD.tscn" id="3_llmhud"]
 [ext_resource type="PackedScene" path="res://client/scenes/ConnectionDialog.tscn" id="4_conndlg"]
 [ext_resource type="PackedScene" path="res://client/scenes/WorldSelectionDialog.tscn" id="5_worlddlg"]
+[ext_resource type="Script" uid="uid://c12wpx5gdbt0d" path="res://client/scripts/GlbShowcase.gd" id="6_glb_showcase"]
+[ext_resource type="PackedScene" path="res://client/scenes/ModelSelectionDialog.tscn" id="7_modeldlg"]
+[ext_resource type="PackedScene" path="res://client/scenes/SpellCreationScreen.tscn" id="8_spellcreate"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_1"]
 sky_top_color = Color(0.35, 0.55, 0.85, 1)
@@ -49,7 +51,7 @@ script = ExtResource("2_voxel")
 [node name="ClientController" type="Node" parent="." unique_id=1615734095]
 script = ExtResource("1_client")
 
-[node name="GlbShowcase" type="Node3D" parent="."]
+[node name="GlbShowcase" type="Node3D" parent="." unique_id=1216883222]
 script = ExtResource("6_glb_showcase")
 
 [node name="LLMChatHUD" parent="." unique_id=656070106 instance=ExtResource("3_llmhud")]
@@ -57,3 +59,7 @@ script = ExtResource("6_glb_showcase")
 [node name="ConnectionDialog" parent="." unique_id=1556652101 instance=ExtResource("4_conndlg")]
 
 [node name="WorldSelectionDialog" parent="." unique_id=1495878391 instance=ExtResource("5_worlddlg")]
+
+[node name="ModelSelectionDialog" parent="." unique_id=885959644 instance=ExtResource("7_modeldlg")]
+
+[node name="SpellCreationScreen" parent="." unique_id=632058577 instance=ExtResource("8_spellcreate")]
