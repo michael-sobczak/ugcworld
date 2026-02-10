@@ -2,6 +2,7 @@ extends SceneTree
 
 const DEFAULT_UNIT_DIR := "res://test/unit"
 const DEFAULT_INTEGRATION_DIR := "res://test/integration"
+const DEFAULT_EVAL_DIR := "res://test/eval"
 
 var _results := []
 var _current_suite_path := ""
@@ -9,9 +10,11 @@ var _current_test_name := ""
 var _current_failures: Array[String] = []
 
 func _initialize() -> void:
-	var args := _parse_args(OS.get_cmdline_args())
-	var mode := args.get("mode", "all")
-	var junit_path := args.get("junit", "")
+	# get_cmdline_user_args() returns only args after "--" (Godot strips the
+	# separator).  get_cmdline_args() does NOT include them on all platforms.
+	var args := _parse_args(OS.get_cmdline_user_args())
+	var mode: String = args.get("mode", "all")
+	var junit_path: String = args.get("junit", "")
 	var start_time := Time.get_ticks_msec()
 
 	var test_dirs: Array[String] = []
@@ -19,13 +22,17 @@ func _initialize() -> void:
 		test_dirs.append(DEFAULT_UNIT_DIR)
 	elif mode == "integration":
 		test_dirs.append(DEFAULT_INTEGRATION_DIR)
+	elif mode == "eval":
+		test_dirs.append(DEFAULT_EVAL_DIR)
 	else:
+		# "all" runs unit + integration but NOT eval (eval requires a local
+		# LLM model and may take several minutes).
 		test_dirs.append(DEFAULT_UNIT_DIR)
 		test_dirs.append(DEFAULT_INTEGRATION_DIR)
 
 	var test_files := _discover_test_files(test_dirs)
 	for test_file in test_files:
-		_run_suite(test_file)
+		await _run_suite(test_file)
 
 	var duration_ms := Time.get_ticks_msec() - start_time
 	_print_summary(duration_ms)
@@ -42,19 +49,15 @@ func _parse_args(raw_args: PackedStringArray) -> Dictionary:
 		"junit": ""
 	}
 
-	var passthrough := false
 	for entry in raw_args:
-		if entry == "--":
-			passthrough = true
-			continue
-		if not passthrough:
-			continue
 		if entry == "--unit":
 			args["mode"] = "unit"
 		elif entry == "--integration":
 			args["mode"] = "integration"
 		elif entry == "--all":
 			args["mode"] = "all"
+		elif entry == "--eval":
+			args["mode"] = "eval"
 		elif entry.begins_with("--junit="):
 			args["junit"] = entry.substr("--junit=".length())
 	return args
@@ -95,7 +98,7 @@ func _run_suite(path: String) -> void:
 	if not (instance is GdUnitTestSuite):
 		return
 
-	var methods := instance.get_method_list()
+	var methods: Array = instance.get_method_list()
 	var test_methods: Array[String] = []
 	for method in methods:
 		var name: String = method.get("name", "")
@@ -104,7 +107,7 @@ func _run_suite(path: String) -> void:
 	test_methods.sort()
 
 	if instance.has_method("before_all"):
-		instance.before_all()
+		await instance.call("before_all")
 
 	for test_name in test_methods:
 		_current_suite_path = path
@@ -112,16 +115,16 @@ func _run_suite(path: String) -> void:
 		_current_failures = []
 		instance._set_reporter(self)
 		if instance.has_method("before_each"):
-			instance.before_each()
+			await instance.call("before_each")
 		var test_start := Time.get_ticks_msec()
-		instance.call(test_name)
+		await instance.call(test_name)
 		var test_duration := (Time.get_ticks_msec() - test_start) / 1000.0
 		if instance.has_method("after_each"):
-			instance.after_each()
+			await instance.call("after_each")
 		_results.append(_result(path, test_name, test_duration, _current_failures.duplicate()))
 
 	if instance.has_method("after_all"):
-		instance.after_all()
+		await instance.call("after_all")
 
 func record_failure(message: String) -> void:
 	_current_failures.append(message)
@@ -173,7 +176,7 @@ func _write_junit(path: String, duration_ms: int) -> void:
 			suite_time
 		]
 		for result in suite_results:
-			var test_name := result.get("name", "unknown")
+			var test_name: String = result.get("name", "unknown")
 			var test_time := float(result.get("duration", 0.0))
 			xml += "\t\t<testcase classname=\"%s\" name=\"%s\" time=\"%.3f\">" % [suite_path, test_name, test_time]
 			var fails: Array = result.get("failures", [])
@@ -200,7 +203,7 @@ func _write_junit(path: String, duration_ms: int) -> void:
 func _group_by_suite() -> Dictionary:
 	var grouped := {}
 	for result in _results:
-		var suite := result.get("suite", "")
+		var suite: String = result.get("suite", "")
 		if not grouped.has(suite):
 			grouped[suite] = []
 		grouped[suite].append(result)

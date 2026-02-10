@@ -6,13 +6,15 @@ PROJECT_DIR="$ROOT_DIR/player-created-world"
 ARTIFACTS_DIR="$ROOT_DIR/artifacts"
 LOG_DIR="$ARTIFACTS_DIR/test-logs"
 RESULTS_DIR="$ARTIFACTS_DIR/test-results"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 MODE="${1:-all}"
 case "$MODE" in
   unit) MODE_FLAG="--unit" ;;
   integration) MODE_FLAG="--integration" ;;
+  eval) MODE_FLAG="--eval" ;;
   all) MODE_FLAG="--all" ;;
-  *) echo "Usage: $0 [unit|integration|all]"; exit 2 ;;
+  *) echo "Usage: $0 [unit|integration|eval|all]"; exit 2 ;;
 esac
 
 GODOT_BIN="${GODOT_BIN:-}"
@@ -29,11 +31,51 @@ if [[ -z "$GODOT_BIN" ]]; then
   fi
 fi
 
+# ---------------------------------------------------------------------------
+# Ensure the LLM GDExtension is built (required for eval tests)
+# ---------------------------------------------------------------------------
+ensure_llm_extension() {
+  local bin_dir="$PROJECT_DIR/addons/local_llm/bin"
+  local editor_so="$bin_dir/liblocal_llm.linux.editor.x86_64.so"
+
+  if [[ -f "$editor_so" ]]; then
+    echo "[run_tests] LLM GDExtension found: $(basename "$editor_so")"
+    return 0
+  fi
+
+  echo ""
+  echo "[run_tests] LLM GDExtension not found -- building automatically ..."
+  echo "[run_tests] (this is a one-time step; subsequent runs will skip it)"
+  echo ""
+
+  local build_script="$SCRIPT_DIR/build_llm_linux.sh"
+  if [[ ! -x "$build_script" ]]; then
+    echo "[run_tests] ERROR: Build script not found or not executable: $build_script" >&2
+    exit 1
+  fi
+
+  "$build_script"
+
+  if [[ ! -f "$editor_so" ]]; then
+    echo "[run_tests] ERROR: Build completed but .so still missing: $editor_so" >&2
+    exit 1
+  fi
+
+  echo ""
+  echo "[run_tests] GDExtension build succeeded. Continuing with tests ..."
+  echo ""
+}
+
 mkdir -p "$LOG_DIR" "$RESULTS_DIR"
 
 # Disable editor auto server/client to keep tests isolated
 export UGCWORLD_AUTOSTART_SERVER=0
 export UGCWORLD_AUTOCONNECT=0
+
+# Eval mode requires the native LLM extension -- build it if missing
+if [[ "$MODE" == "eval" ]]; then
+  ensure_llm_extension
+fi
 
 "$GODOT_BIN" --headless --path "$PROJECT_DIR" --editor --quit
 

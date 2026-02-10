@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="4" failures="4" time="381.442">
+	<testsuite name="res://test/eval/particle_gen_eval_test.gd" tests="4" failures="4" time="381.431">
+		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_deepseek_snowflake_particle" time="76.316">
+			<failure message="GDScript should compile without errors (got error code 43)">GDScript should compile without errors (got error code 43)</failure>
+		</testcase>
+		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_deepseek_sparkler_particle" time="77.715">
+			<failure message="GDScript should compile without errors (got error code 43)">GDScript should compile without errors (got error code 43)</failure>
+		</testcase>
+		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_qwen_coder_snowflake_particle" time="117.329">
+			<failure message="GDScript should compile without errors (got error code 43)">GDScript should compile without errors (got error code 43)</failure>
+		</testcase>
+		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_qwen_coder_sparkler_particle" time="110.071">
+			<failure message="GDScript should compile without errors (got error code 43)">GDScript should compile without errors (got error code 43)</failure>
+		</testcase>
+	</testsuite>
+</testsuites>
