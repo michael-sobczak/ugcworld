@@ -1,33 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuites tests="14" failures="7" time="1313.534">
-	<testsuite name="res://test/eval/particle_gen_eval_test.gd" tests="14" failures="7" time="1313.524">
-		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_deepseek_fire_burst_particle" time="0.000"></testcase>
-		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_deepseek_healing_aura_particle" time="0.001"></testcase>
-		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_deepseek_lightning_particle" time="0.000"></testcase>
-		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_deepseek_rain_splash_particle" time="0.000"></testcase>
-		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_deepseek_smoke_cloud_particle" time="0.000"></testcase>
-		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_deepseek_snowflake_particle" time="0.001"></testcase>
-		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_deepseek_sparkler_particle" time="0.000"></testcase>
-		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_qwen_coder_fire_burst_particle" time="212.733">
-			<failure message="GDScript should compile without errors (got error code 43)">GDScript should compile without errors (got error code 43)</failure>
-		</testcase>
-		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_qwen_coder_healing_aura_particle" time="208.880">
-			<failure message="GDScript should compile without errors (got error code 43)">GDScript should compile without errors (got error code 43)</failure>
-		</testcase>
-		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_qwen_coder_lightning_particle" time="169.706">
-			<failure message="GDScript should compile without errors (got error code 43)">GDScript should compile without errors (got error code 43)</failure>
-		</testcase>
-		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_qwen_coder_rain_splash_particle" time="170.493">
-			<failure message="GDScript should compile without errors (got error code 43)">GDScript should compile without errors (got error code 43)</failure>
-		</testcase>
-		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_qwen_coder_smoke_cloud_particle" time="179.058">
-			<failure message="GDScript should compile without errors (got error code 43)">GDScript should compile without errors (got error code 43)</failure>
-		</testcase>
-		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_qwen_coder_snowflake_particle" time="169.399">
-			<failure message="GDScript should compile without errors (got error code 43)">GDScript should compile without errors (got error code 43)</failure>
-		</testcase>
-		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_qwen_coder_sparkler_particle" time="203.253">
-			<failure message="GDScript should compile without errors (got error code 43)">GDScript should compile without errors (got error code 43)</failure>
-		</testcase>
+<testsuites tests="14" failures="0" time="1345.116">
+	<testsuite name="res://test/eval/particle_gen_eval_test.gd" tests="14" failures="0" time="1345.108">
+		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_deepseek_fire_burst_particle" time="47.342"></testcase>
+		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_deepseek_healing_aura_particle" time="45.900"></testcase>
+		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_deepseek_lightning_particle" time="45.923"></testcase>
+		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_deepseek_rain_splash_particle" time="47.459"></testcase>
+		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_deepseek_smoke_cloud_particle" time="46.401"></testcase>
+		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_deepseek_snowflake_particle" time="50.234"></testcase>
+		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_deepseek_sparkler_particle" time="46.883"></testcase>
+		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_qwen_coder_fire_burst_particle" time="146.754"></testcase>
+		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_qwen_coder_healing_aura_particle" time="145.181"></testcase>
+		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_qwen_coder_lightning_particle" time="150.051"></testcase>
+		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_qwen_coder_rain_splash_particle" time="139.091"></testcase>
+		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_qwen_coder_smoke_cloud_particle" time="147.448"></testcase>
+		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_qwen_coder_snowflake_particle" time="145.498"></testcase>
+		<testcase classname="res://test/eval/particle_gen_eval_test.gd" name="test_qwen_coder_sparkler_particle" time="140.943"></testcase>
 	</testsuite>
 </testsuites>

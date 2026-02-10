@@ -10,7 +10,7 @@ echo ========================================
 echo.
 
 REM Set environment
-set GODOT_PATH=C:\Users\micha\Downloads\Godot_v4.6-stable_win64.exe\Godot_v4.6-stable_win64.exe
+set GODOT_PATH=C:\Users\micha\Documents\code\godot\Godot_v4.6-stable_win64_console.exe
 set GAME_SERVER_PATH=..\server_godot
 set PORT=5000
 

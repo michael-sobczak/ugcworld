@@ -18,6 +18,14 @@ extends GdUnitTestSuite
 ##   scripts/run_tests.ps1 -Mode eval -EvalModel deepseek-coder-v2
 ##   scripts/run_tests.sh eval deepseek-coder-v2
 ##
+## Run eval tests then view results in a visual grid:
+##   scripts/run_tests.ps1 -Mode eval -ShowResults
+##   scripts/run_tests.sh eval --show-results
+##
+## View results from a previous run (no test execution):
+##   scripts/run_tests.ps1 -ShowResults
+##   scripts/run_tests.sh --show-results
+##
 ## NOTE: These tests are intentionally excluded from the default "all" mode
 ## because they require a downloaded model and may take several minutes.
 
@@ -129,6 +137,22 @@ static func _strip_fences(text: String) -> String:
 	return result.strip_edges()
 
 
+## Save compiled effect code to disk so the eval visualizer can load it later.
+static func _save_effect_code(model_id: String, particle_prompt: String, code: String) -> void:
+	var abs_dir := ProjectSettings.globalize_path("res://artifacts/eval/particle_effects")
+	DirAccess.make_dir_recursive_absolute(abs_dir)
+	var slug := particle_prompt.to_lower().strip_edges().replace(" ", "_")
+	var filename := "%s__%s.gd" % [model_id, slug]
+	var filepath := "res://artifacts/eval/particle_effects".path_join(filename)
+	var f := FileAccess.open(filepath, FileAccess.WRITE)
+	if f:
+		f.store_string(code)
+		f.close()
+		print("[eval] Saved effect code -> %s" % filepath)
+	else:
+		push_warning("[eval] Could not write effect code to %s" % filepath)
+
+
 ## Shared evaluation: load model, generate code, compile, instantiate, scene-load.
 ## Returns true if all checks pass.
 func _run_particle_eval(model_id: String, particle_prompt: String) -> void:
@@ -217,6 +241,9 @@ func _run_particle_eval(model_id: String, particle_prompt: String) -> void:
 		print(code)
 		return
 	print("%s   Compilation: PASS" % tag)
+
+	# Save compiled code for the eval visualizer grid
+	_save_effect_code(model_id, particle_prompt, code)
 
 	# ---- Step 6/7: Instantiate & verify ------------------------------------
 	print("%s Step 6/7: Instantiating and verifying node ..." % tag)

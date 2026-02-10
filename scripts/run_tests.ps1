@@ -3,7 +3,12 @@ param(
     [string]$Mode = "all",
 
     # Optional: restrict eval tests to a single model (e.g. "deepseek-coder-v2")
-    [string]$EvalModel = ""
+    [string]$EvalModel = "",
+
+    # Launch the visual particle effect grid after tests complete.
+    # When used alone (-ShowResults without -Mode), skips test run and just
+    # opens the viewer for results from a previous eval run.
+    [switch]$ShowResults
 )
 
 # Use "Continue" so stderr from native executables (Godot, llama.cpp) does
@@ -34,6 +39,7 @@ function Resolve-GodotBin {
     if ($cmd) { return $cmd.Path }
 
     $fallbacks = @(
+        "C:\Users\micha\Documents\code\godot\Godot_v4.6-stable_win64_console.exe",
         (Join-Path $rootDir "godot\Godot_v4.6-stable_win64_console.exe"),
         "C:\Godot\Godot_v4.6-stable_win64_console.exe",
         "C:\Godot\Godot_v4.6-stable_win64.exe"
@@ -96,45 +102,72 @@ New-Item -ItemType Directory -Force -Path $resultsDir | Out-Null
 $env:UGCWORLD_AUTOSTART_SERVER = "0"
 $env:UGCWORLD_AUTOCONNECT = "0"
 
-# Pass model filter to eval tests (empty string = run all models)
-$env:EVAL_MODEL_FILTER = $EvalModel
-if ($EvalModel) {
-    Write-Host "[run_tests] Filtering eval tests to model: $EvalModel"
-}
-
-# Eval mode requires the native LLM extension -- build it if missing
-if ($Mode -eq "eval") {
-    Ensure-LLMExtension
-}
-
-# NOTE: The non-console Godot exe (Godot_v4.6-stable_win64.exe) is a GUI
-# subsystem binary.  PowerShell does NOT wait for GUI executables launched
-# with & (call operator).  Wrapping in Start-Process -Wait ensures we block
-# until Godot exits and capture its exit code properly.
+# The console Godot exe (Godot_v4.6-stable_win64_console.exe) is a console-
+# subsystem binary, so PowerShell's call operator (&) blocks until it exits
+# and stdout/stderr stream to the terminal normally.
+#
+# IMPORTANT: Do NOT capture Run-Godot's return value with $x = Run-Godot ...
+# PowerShell functions emit ALL unassigned output to the pipeline, so the
+# Godot stdout lines would be included alongside the exit code.  Instead,
+# call Run-Godot without assignment and read $LASTEXITCODE afterwards.
 function Run-Godot {
     param([string[]]$GodotArgs)
-    $proc = Start-Process -FilePath $godot -ArgumentList $GodotArgs `
-        -NoNewWindow -Wait -PassThru
-    return $proc.ExitCode
+    & $godot @GodotArgs
 }
 
-$importExit = Run-Godot "--headless","--path",$projectDir,"--editor","--quit"
-if ($importExit -ne 0) {
-    Write-Host "[run_tests] Editor import failed (exit code $importExit)" -ForegroundColor Red
-    exit $importExit
+# ---------------------------------------------------------------------------
+# Decide whether to run tests.
+# -ShowResults alone (no explicit -Mode) skips the test run and just opens
+# the visualizer for results from a previous eval run.
+# ---------------------------------------------------------------------------
+$runTests = (-not $ShowResults) -or $PSBoundParameters.ContainsKey('Mode')
+$testExit = 0
+
+if ($runTests) {
+    # Pass model filter to eval tests (empty string = run all models)
+    $env:EVAL_MODEL_FILTER = $EvalModel
+    if ($EvalModel) {
+        Write-Host "[run_tests] Filtering eval tests to model: $EvalModel"
+    }
+
+    # Eval mode requires the native LLM extension -- build it if missing
+    if ($Mode -eq "eval") {
+        Ensure-LLMExtension
+    }
+
+    Run-Godot "--headless","--path",$projectDir,"--editor","--quit"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[run_tests] Editor import failed (exit code $LASTEXITCODE)" -ForegroundColor Red
+        exit $LASTEXITCODE
+    }
+
+    $modeFlag = switch ($Mode) {
+        "unit" { "--unit" }
+        "integration" { "--integration" }
+        "eval" { "--eval" }
+        default { "--all" }
+    }
+
+    Write-Host "[run_tests] Starting test runner (mode=$Mode) ..."
+    Run-Godot "--headless","--path",$projectDir, `
+        "--script","res://addons/gdUnit4/bin/GdUnitRunner.gd","--", `
+        $modeFlag, `
+        "--junit=res://artifacts/test-results/junit.xml"
+    $testExit = $LASTEXITCODE
+    Write-Host "[run_tests] Test runner exited with code: $testExit"
 }
 
-$modeFlag = switch ($Mode) {
-    "unit" { "--unit" }
-    "integration" { "--integration" }
-    "eval" { "--eval" }
-    default { "--all" }
+# ---------------------------------------------------------------------------
+# Visual results viewer — opens a Godot window (NOT headless) showing all
+# generated particle effects in a labeled grid.
+# ---------------------------------------------------------------------------
+if ($ShowResults) {
+    Write-Host ""
+    Write-Host "[run_tests] Launching particle effect visualizer ..." -ForegroundColor Cyan
+    Write-Host "[run_tests] Controls: ESC = quit, SPACE = replay effects" -ForegroundColor Cyan
+    Write-Host ""
+    Run-Godot "--path",$projectDir, `
+        "--script","res://test/eval/particle_eval_visualizer.gd"
 }
 
-Write-Host "[run_tests] Starting test runner (mode=$Mode) ..."
-$testExit = Run-Godot "--headless","--path",$projectDir, `
-    "--script","res://addons/gdUnit4/bin/GdUnitRunner.gd","--", `
-    $modeFlag, `
-    "--junit=res://artifacts/test-results/junit.xml"
-Write-Host "[run_tests] Test runner exited with code: $testExit"
 exit $testExit

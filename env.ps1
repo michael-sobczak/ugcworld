@@ -1,9 +1,10 @@
 # UGC World Environment Configuration (PowerShell)
 # Source this file before running the server: . .\env.ps1
 
-# Path to Godot 4.6 executable (used to spawn headless game servers)
-# UPDATE THIS to match your Godot installation
-$env:GODOT_PATH = "C:\Users\micha\Downloads\Godot_v4.6-stable_win64.exe\Godot_v4.6-stable_win64.exe"
+# Path to Godot 4.6 executables
+# Console exe is preferred for CLI / headless use (PowerShell waits for it
+# correctly and stdout streams to the terminal).
+$env:GODOT_PATH = "C:\Users\micha\Documents\code\godot\Godot_v4.6-stable_win64_console.exe"
 # Test runner uses GODOT_BIN; keep it in sync with GODOT_PATH
 $env:GODOT_BIN = $env:GODOT_PATH
 

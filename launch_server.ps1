@@ -28,7 +28,7 @@ $env:PORT = $Port
 $env:HOST = "0.0.0.0"
 
 if (-not $env:GODOT_PATH) {
-    $env:GODOT_PATH = "C:\Users\micha\Downloads\Godot_v4.6-stable_win64.exe\Godot_v4.6-stable_win64.exe"
+    $env:GODOT_PATH = "C:\Users\micha\Documents\code\godot\Godot_v4.6-stable_win64_console.exe"
 }
 $env:GAME_SERVER_PATH = "$PWD\server_godot"
 
