@@ -53,7 +53,7 @@ const REQUEST_TEMPLATE = {
 	"prompt": "",                # Required: Input text
 	"system_prompt": "",         # Optional: System instructions
 	"max_tokens": 512,           # Maximum tokens to generate
-	"temperature": 0.7,          # Sampling temperature (0.0-2.0)
+	"temperature": 0.0,          # Sampling temperature (0.0-2.0)
 	"top_p": 0.9,                # Nucleus sampling threshold
 	"top_k": 40,                 # Top-k sampling
 	"repeat_penalty": 1.1,       # Repetition penalty

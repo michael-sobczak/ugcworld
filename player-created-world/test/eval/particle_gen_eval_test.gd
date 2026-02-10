@@ -14,6 +14,10 @@ extends GdUnitTestSuite
 ##   scripts/run_tests.ps1 -Mode eval
 ##   scripts/run_tests.sh eval
 ##
+## Run a single model only:
+##   scripts/run_tests.ps1 -Mode eval -EvalModel deepseek-coder-v2
+##   scripts/run_tests.sh eval deepseek-coder-v2
+##
 ## NOTE: These tests are intentionally excluded from the default "all" mode
 ## because they require a downloaded model and may take several minutes.
 
@@ -22,12 +26,31 @@ const MODEL_DEEPSEEK := "deepseek-coder-v2"
 const MODEL_QWEN_CODER := "qwen2.5-coder-14b"
 const PROMPT_SNOWFLAKE := "snowflake particle effect"
 const PROMPT_SPARKLER := "sparkler effect"
+const PROMPT_FIRE_BURST := "fire burst explosion with embers"
+const PROMPT_HEALING_AURA := "green healing aura with rising sparkles"
+const PROMPT_LIGHTNING := "lightning bolt impact with electric arcs"
+const PROMPT_SMOKE_CLOUD := "thick smoke cloud that slowly dissipates"
+const PROMPT_RAIN_SPLASH := "rain splashing on the ground with ripples"
 const SYSTEM_PROMPT_PATH := "res://client/prompts/generate_particle_effect.md"
+
+## Environment variable to restrict eval tests to a single model.
+## When set (e.g. EVAL_MODEL_FILTER=deepseek-coder-v2), only tests for that
+## model will execute; all others are skipped.
+const ENV_MODEL_FILTER := "EVAL_MODEL_FILTER"
 
 
 # ============================================================================
 # Helpers
 # ============================================================================
+
+## Check if a model should be skipped based on the EVAL_MODEL_FILTER env var.
+## Returns true if the test should be skipped (model doesn't match filter).
+static func _should_skip_model(model_id: String) -> bool:
+	var filter := OS.get_environment(ENV_MODEL_FILTER)
+	if filter.is_empty():
+		return false
+	return filter != model_id
+
 
 ## Get the LocalLLMService autoload from the scene tree.
 static func _get_llm() -> Node:
@@ -76,8 +99,8 @@ func _generate(llm: Node, prompt: String, system_prompt: String) -> String:
 	var handle = llm.generate_streaming({
 		"prompt": prompt,
 		"system_prompt": system_prompt,
-		"max_tokens": 2048,
-		"temperature": 0.3,
+		"max_tokens": 4096,
+		"temperature": 0.0,
 	})
 	if handle == null:
 		return ""
@@ -109,6 +132,10 @@ static func _strip_fences(text: String) -> String:
 ## Shared evaluation: load model, generate code, compile, instantiate, scene-load.
 ## Returns true if all checks pass.
 func _run_particle_eval(model_id: String, particle_prompt: String) -> void:
+	if _should_skip_model(model_id):
+		print("[eval] Skipping %s (EVAL_MODEL_FILTER=%s)" % [model_id, OS.get_environment(ENV_MODEL_FILTER)])
+		return
+
 	var tag := "[eval %s | \"%s\"]" % [model_id, particle_prompt]
 	var total_start := Time.get_ticks_msec()
 
@@ -138,11 +165,11 @@ func _run_particle_eval(model_id: String, particle_prompt: String) -> void:
 	# ---- Step 2/7: Load model ----------------------------------------------
 	# Cap context length to avoid allocating enormous KV caches.
 	# DeepSeek-Coder-V2's default 163840 context would need 43+ GB of RAM.
-	# 4096 tokens is plenty for particle effect code generation.
+	# 8192 tokens gives enough room for system prompt + generated code.
 	var settings = llm.get("_settings")
 	if settings != null and settings.context_length <= 0:
-		settings.context_length = 4096
-		print("%s   Capped context_length to 4096 to save memory" % tag)
+		settings.context_length = 8192
+		print("%s   Capped context_length to 8192 to save memory" % tag)
 
 	print("%s Step 2/7: Loading model %s ..." % [tag, model_id])
 	var load_start := Time.get_ticks_msec()
@@ -257,6 +284,31 @@ func test_deepseek_sparkler_particle() -> void:
 	await _run_particle_eval(MODEL_DEEPSEEK, PROMPT_SPARKLER)
 
 
+## Generate a fire burst effect using deepseek-coder-v2.
+func test_deepseek_fire_burst_particle() -> void:
+	await _run_particle_eval(MODEL_DEEPSEEK, PROMPT_FIRE_BURST)
+
+
+## Generate a healing aura effect using deepseek-coder-v2.
+func test_deepseek_healing_aura_particle() -> void:
+	await _run_particle_eval(MODEL_DEEPSEEK, PROMPT_HEALING_AURA)
+
+
+## Generate a lightning impact effect using deepseek-coder-v2.
+func test_deepseek_lightning_particle() -> void:
+	await _run_particle_eval(MODEL_DEEPSEEK, PROMPT_LIGHTNING)
+
+
+## Generate a smoke cloud effect using deepseek-coder-v2.
+func test_deepseek_smoke_cloud_particle() -> void:
+	await _run_particle_eval(MODEL_DEEPSEEK, PROMPT_SMOKE_CLOUD)
+
+
+## Generate a rain splash effect using deepseek-coder-v2.
+func test_deepseek_rain_splash_particle() -> void:
+	await _run_particle_eval(MODEL_DEEPSEEK, PROMPT_RAIN_SPLASH)
+
+
 # ============================================================================
 # Tests — Qwen 2.5 Coder
 # ============================================================================
@@ -271,3 +323,28 @@ func test_qwen_coder_snowflake_particle() -> void:
 ## compiles as valid GDScript and can be loaded into the scene tree.
 func test_qwen_coder_sparkler_particle() -> void:
 	await _run_particle_eval(MODEL_QWEN_CODER, PROMPT_SPARKLER)
+
+
+## Generate a fire burst effect using qwen2.5-coder-14b.
+func test_qwen_coder_fire_burst_particle() -> void:
+	await _run_particle_eval(MODEL_QWEN_CODER, PROMPT_FIRE_BURST)
+
+
+## Generate a healing aura effect using qwen2.5-coder-14b.
+func test_qwen_coder_healing_aura_particle() -> void:
+	await _run_particle_eval(MODEL_QWEN_CODER, PROMPT_HEALING_AURA)
+
+
+## Generate a lightning impact effect using qwen2.5-coder-14b.
+func test_qwen_coder_lightning_particle() -> void:
+	await _run_particle_eval(MODEL_QWEN_CODER, PROMPT_LIGHTNING)
+
+
+## Generate a smoke cloud effect using qwen2.5-coder-14b.
+func test_qwen_coder_smoke_cloud_particle() -> void:
+	await _run_particle_eval(MODEL_QWEN_CODER, PROMPT_SMOKE_CLOUD)
+
+
+## Generate a rain splash effect using qwen2.5-coder-14b.
+func test_qwen_coder_rain_splash_particle() -> void:
+	await _run_particle_eval(MODEL_QWEN_CODER, PROMPT_RAIN_SPLASH)

@@ -385,7 +385,7 @@ func generate_streaming(request: Dictionary):  # -> LLMGenerationHandle or null
 		"prompt": request.get("prompt", ""),
 		"system_prompt": request.get("system_prompt", ""),
 		"max_tokens": request.get("max_tokens", _settings.max_tokens_default),
-		"temperature": request.get("temperature", 0.7),
+		"temperature": request.get("temperature", 0.0),
 		"top_p": request.get("top_p", 0.9),
 		"top_k": request.get("top_k", 40),
 		"repeat_penalty": request.get("repeat_penalty", 1.1),

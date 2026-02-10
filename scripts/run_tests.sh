@@ -9,12 +9,13 @@ RESULTS_DIR="$ARTIFACTS_DIR/test-results"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 MODE="${1:-all}"
+EVAL_MODEL="${2:-}"
 case "$MODE" in
   unit) MODE_FLAG="--unit" ;;
   integration) MODE_FLAG="--integration" ;;
   eval) MODE_FLAG="--eval" ;;
   all) MODE_FLAG="--all" ;;
-  *) echo "Usage: $0 [unit|integration|eval|all]"; exit 2 ;;
+  *) echo "Usage: $0 [unit|integration|eval|all] [model-id]"; exit 2 ;;
 esac
 
 GODOT_BIN="${GODOT_BIN:-}"
@@ -71,6 +72,12 @@ mkdir -p "$LOG_DIR" "$RESULTS_DIR"
 # Disable editor auto server/client to keep tests isolated
 export UGCWORLD_AUTOSTART_SERVER=0
 export UGCWORLD_AUTOCONNECT=0
+
+# Pass model filter to eval tests (empty = run all models)
+export EVAL_MODEL_FILTER="${EVAL_MODEL}"
+if [[ -n "$EVAL_MODEL" ]]; then
+  echo "[run_tests] Filtering eval tests to model: $EVAL_MODEL"
+fi
 
 # Eval mode requires the native LLM extension -- build it if missing
 if [[ "$MODE" == "eval" ]]; then

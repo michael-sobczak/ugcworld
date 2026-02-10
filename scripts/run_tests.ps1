@@ -1,6 +1,9 @@
 param(
     [ValidateSet("unit", "integration", "eval", "all")]
-    [string]$Mode = "all"
+    [string]$Mode = "all",
+
+    # Optional: restrict eval tests to a single model (e.g. "deepseek-coder-v2")
+    [string]$EvalModel = ""
 )
 
 # Use "Continue" so stderr from native executables (Godot, llama.cpp) does
@@ -92,6 +95,12 @@ New-Item -ItemType Directory -Force -Path $resultsDir | Out-Null
 # Disable editor auto server/client to keep tests isolated
 $env:UGCWORLD_AUTOSTART_SERVER = "0"
 $env:UGCWORLD_AUTOCONNECT = "0"
+
+# Pass model filter to eval tests (empty string = run all models)
+$env:EVAL_MODEL_FILTER = $EvalModel
+if ($EvalModel) {
+    Write-Host "[run_tests] Filtering eval tests to model: $EvalModel"
+}
 
 # Eval mode requires the native LLM extension -- build it if missing
 if ($Mode -eq "eval") {

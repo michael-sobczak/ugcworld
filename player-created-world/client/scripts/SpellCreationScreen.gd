@@ -158,7 +158,7 @@ func _llm_request(prompt: String, system_prompt: String, opts: Dictionary = {}) 
 		"prompt": prompt,
 		"system_prompt": system_prompt,
 		"max_tokens": opts.get("max_tokens", 1024),
-		"temperature": opts.get("temperature", 0.7),
+		"temperature": opts.get("temperature", 0.0),
 	})
 	if handle == null:
 		return ""

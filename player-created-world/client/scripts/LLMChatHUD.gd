@@ -87,7 +87,7 @@ func _on_send_pressed() -> void:
 	_current_handle = LocalLLMService.generate_streaming({
 		"prompt": prompt,
 		"max_tokens": 512,
-		"temperature": 0.7
+		"temperature": 0.0
 	})
 	
 	if _current_handle == null:

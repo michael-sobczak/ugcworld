@@ -11,7 +11,7 @@ nodes:
     type: llm.chat
     prompt: "{{inputs.user_prompt}}"
     system_prompt_file: "res://client/prompts/generate_spell_description.md"
-    args: { max_tokens: 1024, temperature: 0.7 }
+    args: { max_tokens: 1024, temperature: 0 }
     out: [text]
 
   # Step 2 — Generate an asset manifest (JSON) from the description
@@ -20,7 +20,7 @@ nodes:
     needs: [describe]
     prompt: "{{nodes.describe.text}}"
     system_prompt_file: "res://client/prompts/generate_spell_asset_manifest.md"
-    args: { max_tokens: 1024, temperature: 0.7 }
+    args: { max_tokens: 1024, temperature: 0 }
     out: [text]
 
   # Step 3 — Generate particle effect GDScript code.
@@ -31,7 +31,7 @@ nodes:
     needs: [manifest]
     prompt: "{{nodes.manifest.text}}"
     system_prompt_file: "res://client/prompts/generate_particle_effect.md"
-    args: { max_tokens: 2048, temperature: 0.7 }
+    args: { max_tokens: 2048, temperature: 0 }
     out: [text]
 
   # Step 4 — Strip markdown fences from output (pure transform, no LLM)

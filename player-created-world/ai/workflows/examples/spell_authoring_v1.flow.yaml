@@ -24,7 +24,7 @@ nodes:
     type: llm.chat
     prompt: "{{inputs.user_prompt}}"
     system_prompt_file: "res://client/prompts/generate_spell_description.md"
-    args: { max_tokens: 1024, temperature: 0.7 }
+    args: { max_tokens: 1024, temperature: 0 }
     out: [text]
 
   - id: manifest
@@ -32,7 +32,7 @@ nodes:
     needs: [describe]
     prompt: "{{nodes.describe.text}}"
     system_prompt_file: "res://client/prompts/generate_spell_asset_manifest.md"
-    args: { max_tokens: 1024, temperature: 0.7 }
+    args: { max_tokens: 1024, temperature: 0 }
     out: [text]
 
   - id: particle_gen
@@ -40,7 +40,7 @@ nodes:
     needs: [manifest]
     prompt: "{{nodes.manifest.text}}"
     system_prompt_file: "res://client/prompts/generate_particle_effect.md"
-    args: { max_tokens: 2048, temperature: 0.7 }
+    args: { max_tokens: 2048, temperature: 0 }
     out: [text]
 
   - id: sanitize
@@ -48,7 +48,7 @@ nodes:
     needs: [particle_gen]
     prompt: "{{nodes.particle_gen.text}}"
     system_prompt_file: "res://client/prompts/sanitize_gdscript.md"
-    args: { max_tokens: 1536, temperature: 0.1 }
+    args: { max_tokens: 1536, temperature: 0 }
     out: [text]
 
   - id: clean_code

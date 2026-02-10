@@ -61,7 +61,7 @@ func run(ctx: WorkflowContext, node_def: Dictionary) -> Dictionary:
 		"prompt": prompt,
 		"system_prompt": system_prompt,
 		"max_tokens": params.get("max_tokens", 1024),
-		"temperature": params.get("temperature", 0.7),
+		"temperature": params.get("temperature", 0.0),
 	}
 
 	var handle: Variant = llm.generate_streaming(request)

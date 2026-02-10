@@ -26,7 +26,7 @@ var max_tokens_default: int = 512
 var auto_load_last_model: bool = false
 
 ## Temperature default
-var temperature_default: float = 0.7
+var temperature_default: float = 0.0
 
 ## Top-p default
 var top_p_default: float = 0.9
@@ -119,7 +119,7 @@ func reset_to_defaults() -> void:
 	n_gpu_layers = 0
 	max_tokens_default = 512
 	auto_load_last_model = false
-	temperature_default = 0.7
+	temperature_default = 0.0
 	top_p_default = 0.9
 	save_settings()
 

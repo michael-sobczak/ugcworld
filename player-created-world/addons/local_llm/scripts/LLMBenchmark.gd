@@ -96,7 +96,7 @@ static func run_benchmark(
 	var handle = service.generate_streaming({
 		"prompt": prompt,
 		"max_tokens": max_tokens,
-		"temperature": 0.7,
+		"temperature": 0.0,
 		"stream": true
 	})
 	

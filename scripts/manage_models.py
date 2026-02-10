@@ -485,7 +485,7 @@ def update_models_json() -> None:
         "models": models_array,
         "presets": {
             "coding": {
-                "temperature": 0.3,
+                "temperature": 0.0,
                 "top_p": 0.9,
                 "top_k": 40,
                 "repeat_penalty": 1.1,
@@ -493,7 +493,7 @@ def update_models_json() -> None:
                 "system_prompt": "You are a helpful coding assistant. Provide clear, concise, and correct code solutions."
             },
             "creative": {
-                "temperature": 0.9,
+                "temperature": 0.0,
                 "top_p": 0.95,
                 "top_k": 50,
                 "repeat_penalty": 1.05,
@@ -501,7 +501,7 @@ def update_models_json() -> None:
                 "system_prompt": "You are a creative writing assistant."
             },
             "precise": {
-                "temperature": 0.1,
+                "temperature": 0.0,
                 "top_p": 0.8,
                 "top_k": 20,
                 "repeat_penalty": 1.2,
@@ -509,7 +509,7 @@ def update_models_json() -> None:
                 "system_prompt": "You are a precise technical assistant. Be accurate and concise."
             },
             "conversational": {
-                "temperature": 0.7,
+                "temperature": 0.0,
                 "top_p": 0.9,
                 "top_k": 40,
                 "repeat_penalty": 1.1,
