@@ -82,6 +82,62 @@
 				"assistant_prefix": "### Response:\n",
 				"assistant_suffix": "\n\n"
 			}
+		},
+		{
+			"id": "deepseek-r1-distill-14b",
+			"display_name": "DeepSeek R1 Distill Qwen 14B (Q4_K_M)",
+			"backend": "llama.cpp",
+			"context_length": 131072,
+			"recommended_threads": 8,
+			"quantization": "Q4_K_M",
+			"file_path_in_pck": "res://models/deepseek-r1-distill-qwen-14b-q4_k_m.gguf",
+			"sha256": "",
+			"size_bytes": 8988110240,
+			"estimated_memory": 11580653568,
+			"description": "Reasoning model - Chain-of-thought reasoning distilled from DeepSeek R1, strong at code and math",
+			"tags": [
+				"reasoning",
+				"coding",
+				"14b",
+				"quantized",
+				"r1"
+			],
+			"prompt_template": {
+				"system_prefix": "<|begin\u2581of\u2581sentence|>",
+				"system_suffix": "\n",
+				"user_prefix": "<|User|>",
+				"user_suffix": "\n",
+				"assistant_prefix": "<|Assistant|>",
+				"assistant_suffix": "\n"
+			}
+		},
+		{
+			"id": "qwen3-32b",
+			"display_name": "Qwen3 32B (Q4_K_M)",
+			"backend": "llama.cpp",
+			"context_length": 131072,
+			"recommended_threads": 8,
+			"quantization": "Q4_K_M",
+			"file_path_in_pck": "res://models/qwen3-32b-q4_k_m.gguf",
+			"sha256": "",
+			"size_bytes": 19762149696,
+			"estimated_memory": 25466653900,
+			"description": "Flagship model - Latest Qwen3 32B with thinking mode, strongest overall quality",
+			"tags": [
+				"reasoning",
+				"coding",
+				"32b",
+				"quantized",
+				"flagship"
+			],
+			"prompt_template": {
+				"system_prefix": "<|im_start|>system\n",
+				"system_suffix": "<|im_end|>\n",
+				"user_prefix": "<|im_start|>user\n",
+				"user_suffix": "<|im_end|>\n",
+				"assistant_prefix": "<|im_start|>assistant\n",
+				"assistant_suffix": "<|im_end|>\n"
+			}
 		}
 	],
 	"presets": {

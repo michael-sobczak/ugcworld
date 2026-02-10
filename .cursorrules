@@ -115,6 +115,7 @@ These singletons are always available (defined in project.godot):
 - Use explicit null checks: `if node != null:`
 - Prefer signals over direct method calls for decoupling
 - Document autoload dependencies in script header comments
+- **Never use `:=` when the right-hand side returns Variant or an untyped value.** Godot's "infer from Variant" warning (treated as error) will reject `var x := some_untyped_func()`. Use an explicit type instead: `var x: Variant = func()`, `var x: Node = get_node(...)`, etc.
 
 ### GDScript Validation (REQUIRED)
 
@@ -145,6 +146,7 @@ godot --headless --check-only
 - Missing `extends` declaration
 - Cyclic dependencies between scripts
 - Invalid autoload references
+- **`:=` with Variant inference**: Using `:=` on a call that returns Variant (e.g. `get_node()`, `Dictionary.get()`, JSON results) causes "inference of Variant" error. Use explicit types: `var node: Node = get_node(...)`, `var val: Variant = dict.get(...)`
 
 **Note:** The `--check-only` flag validates syntax without running the game. Exit code 0 means success, non-zero means errors were found.
 

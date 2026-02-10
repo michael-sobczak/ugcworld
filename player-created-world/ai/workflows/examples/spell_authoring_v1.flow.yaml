@@ -1,0 +1,67 @@
+# Example: spell_authoring_v1 workflow
+#
+# This is a copy of the production workflow at res://ai/workflows/spell_authoring_v1.flow.yaml
+# kept here as a reference / documentation example.
+#
+# To run:
+#   var executor := WorkflowExecutor.new()
+#   var result = await executor.run_workflow(
+#       "res://ai/workflows/spell_authoring_v1.flow.yaml",
+#       {"user_prompt": "a snowball that explodes into ice shards"}
+#   )
+#   print(result["description"])
+#   print(result["particle_code"])
+
+$schema: "res://ai/workflows/schema/workflow.schema.json"
+id: "spell_authoring_v1"
+version: 1
+
+inputs:
+  user_prompt: { type: string, description: "The user's natural-language spell idea" }
+
+nodes:
+  - id: describe
+    type: llm.chat
+    prompt: "{{inputs.user_prompt}}"
+    system_prompt_file: "res://client/prompts/generate_spell_description.md"
+    args: { max_tokens: 1024, temperature: 0.7 }
+    out: [text]
+
+  - id: manifest
+    type: llm.chat
+    needs: [describe]
+    prompt: "{{nodes.describe.text}}"
+    system_prompt_file: "res://client/prompts/generate_spell_asset_manifest.md"
+    args: { max_tokens: 1024, temperature: 0.7 }
+    out: [text]
+
+  - id: particle_gen
+    type: llm.chat
+    needs: [manifest]
+    prompt: "{{nodes.manifest.text}}"
+    system_prompt_file: "res://client/prompts/generate_particle_effect.md"
+    args: { max_tokens: 2048, temperature: 0.7 }
+    out: [text]
+
+  - id: sanitize
+    type: llm.chat
+    needs: [particle_gen]
+    prompt: "{{nodes.particle_gen.text}}"
+    system_prompt_file: "res://client/prompts/sanitize_gdscript.md"
+    args: { max_tokens: 1536, temperature: 0.1 }
+    out: [text]
+
+  - id: clean_code
+    type: transform.text
+    needs: [sanitize]
+    args:
+      op: regex_replace
+      input: "{{nodes.sanitize.text}}"
+      pattern: "^```(?:gdscript|gd)?\\n?|\\n?```$"
+      replacement: ""
+    out: [text]
+
+outputs:
+  description: "{{nodes.describe.text}}"
+  manifest: "{{nodes.manifest.text}}"
+  particle_code: "{{nodes.clean_code.text}}"

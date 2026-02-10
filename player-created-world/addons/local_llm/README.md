@@ -45,8 +45,11 @@ Full documentation: docs/LOCAL_LLM.md
 
 ## Current Models
 
-- Qwen 2.5 Coder 14B (Q4_K_M) - Default model for code generation
-- Qwen 2.5 Coder 14B (Q5_K_M) - Higher quality variant
+- **Phi-3.5 Mini Instruct** (Q4_K_M, 2.4 GB) - Lightweight chat, fast responses
+- **Qwen 2.5 Coder 14B** (Q4_K_M, 8.7 GB) - Default model for code generation
+- **DeepSeek Coder V2 Lite** (Q4_K_M, 8.9 GB) - Precise code execution and validation
+- **DeepSeek R1 Distill Qwen 14B** (Q4_K_M, 9.0 GB) - Chain-of-thought reasoning from DeepSeek R1
+- **Qwen3 32B** (Q4_K_M, 19.8 GB) - Flagship model with thinking mode, strongest quality
 
 ## License
 

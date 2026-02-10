@@ -18,6 +18,7 @@ Also fix:
 - Remove any non-GDScript prose/comments that aren't valid GDScript
 - Ensure file starts with extends
 - Ensure static typing where obvious
+- Replace `:=` with explicit type when RHS returns Variant (e.g. get_node(), Dictionary.get(), JSON parse results). Use `var x: Node = ...` or `var x: Variant = ...` instead of `var x := ...`
 
 CRITICAL — No external assets allowed:
 - Replace ANY load("res://...") or preload("res://...") calls with procedural alternatives

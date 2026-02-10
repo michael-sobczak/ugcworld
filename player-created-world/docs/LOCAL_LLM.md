@@ -1,6 +1,6 @@
 # Local LLM Integration
 
-Fully embedded, offline LLM runtime for the Godot game client. Ships with Qwen2.5-Coder 14B via llama.cpp, with no external dependencies or network calls required.
+Fully embedded, offline LLM runtime for the Godot game client. Supports multiple models (Qwen2.5-Coder, DeepSeek Coder V2, DeepSeek R1 Distill, Phi-3.5) via llama.cpp, with no external dependencies or network calls required.
 
 ## Overview
 
@@ -468,21 +468,56 @@ signal cancelled()
 
 ## Current Models
 
-The project ships with Qwen 2.5 Coder 14B configurations:
+The project supports the following models (all Q4_K_M quantization via llama.cpp):
 
-| Model ID | Quantization | Size | Context | Description |
-|----------|--------------|------|---------|-------------|
-| qwen2.5-coder-14b-q4_k_m | Q4_K_M | 8.7 GB | 32K | Default, balanced quality/speed |
-| qwen2.5-coder-14b-q5_k_m | Q5_K_M | 10.4 GB | 32K | Higher quality, more memory |
+| Model ID | Display Name | Size | Context | Use Case |
+|----------|-------------|------|---------|----------|
+| phi-3.5-instruct | Phi-3.5 Mini Instruct | 2.4 GB | 128K | Lightweight chat — fast responses, low memory |
+| qwen2.5-coder-14b | Qwen 2.5 Coder 14B | 8.7 GB | 32K | Code generation — default model for spell authoring |
+| deepseek-coder-v2 | DeepSeek Coder V2 Lite | 8.9 GB | 160K | Deterministic executor — precise code validation |
+| deepseek-r1-distill-14b | DeepSeek R1 Distill Qwen 14B | 9.0 GB | 128K | Reasoning — chain-of-thought from DeepSeek R1, strong at code & math |
+| qwen3-32b | Qwen3 32B | 19.8 GB | 128K | Flagship — latest Qwen3 with thinking mode, strongest overall quality |
+
+### Downloading Models
+
+Use the model manager script:
+
+```bash
+python scripts/manage_models.py --list              # Show all available models
+python scripts/manage_models.py --download r1        # Download DeepSeek R1
+python scripts/manage_models.py --download deepseek  # Download DeepSeek Coder V2
+python scripts/manage_models.py --download all       # Download everything
+python scripts/manage_models.py --status             # Check what's installed
+```
+
+### Model Aliases
+
+For convenience, the download script accepts short aliases:
+
+| Alias | Model |
+|-------|-------|
+| `phi`, `fast`, `lightweight` | phi-3.5-instruct |
+| `coder`, `qwen-coder`, `planner` | qwen2.5-coder-14b |
+| `deepseek`, `executor` | deepseek-coder-v2 |
+| `r1`, `deepseek-r1`, `reasoning` | deepseek-r1-distill-14b |
+| `qwen3`, `flagship` | qwen3-32b |
 
 ## License
 
 - **Local LLM Extension**: MIT License (same as project)
 - **llama.cpp**: MIT License
 - **Qwen2.5-Coder**: Apache 2.0 License (check model license before distribution)
+- **Qwen3-32B**: Apache 2.0 License
+- **DeepSeek R1 Distill**: MIT License
+- **DeepSeek Coder V2**: MIT License
+- **Phi-3.5**: MIT License
 
 ## Credits
 
 - llama.cpp: https://github.com/ggerganov/llama.cpp by Georgi Gerganov
 - Qwen2.5-Coder: https://github.com/QwenLM/Qwen2.5-Coder by Alibaba Cloud
+- Qwen3: https://huggingface.co/Qwen/Qwen3-32B by Alibaba Cloud
+- DeepSeek R1: https://github.com/deepseek-ai/DeepSeek-R1 by DeepSeek AI
+- DeepSeek Coder V2: https://github.com/deepseek-ai/DeepSeek-Coder-V2 by DeepSeek AI
+- Phi-3.5: https://huggingface.co/microsoft/Phi-3.5-mini-instruct by Microsoft
 - godot-cpp: https://github.com/godotengine/godot-cpp by Godot Engine contributors

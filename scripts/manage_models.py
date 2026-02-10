@@ -127,6 +127,48 @@ MODELS = {
             "assistant_prefix": "### Response:\n",
             "assistant_suffix": "\n\n"
         }
+    },
+    "deepseek-r1-distill-14b": {
+        "display_name": "DeepSeek R1 Distill Qwen 14B (Q4_K_M)",
+        "description": "Reasoning model - Chain-of-thought reasoning distilled from DeepSeek R1, strong at code and math",
+        "use_case": "reasoning",
+        "url": "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf",
+        "filename": "deepseek-r1-distill-qwen-14b-q4_k_m.gguf",
+        "size_bytes": 9_650_544_640,  # ~9.0 GB
+        "sha256": "",
+        "context_length": 131072,
+        "quantization": "Q4_K_M",
+        "recommended_threads": 8,
+        "tags": ["reasoning", "coding", "14b", "quantized", "r1"],
+        "prompt_template": {
+            "system_prefix": "<|begin▁of▁sentence|>",
+            "system_suffix": "\n",
+            "user_prefix": "<|User|>",
+            "user_suffix": "\n",
+            "assistant_prefix": "<|Assistant|>",
+            "assistant_suffix": "\n"
+        }
+    },
+    "qwen3-32b": {
+        "display_name": "Qwen3 32B (Q4_K_M)",
+        "description": "Flagship model - Latest Qwen3 32B with thinking mode, strongest overall quality",
+        "use_case": "flagship",
+        "url": "https://huggingface.co/bartowski/Qwen_Qwen3-32B-GGUF/resolve/main/Qwen_Qwen3-32B-Q4_K_M.gguf",
+        "filename": "qwen3-32b-q4_k_m.gguf",
+        "size_bytes": 21_222_211_584,  # ~19.8 GB
+        "sha256": "",
+        "context_length": 131072,
+        "quantization": "Q4_K_M",
+        "recommended_threads": 8,
+        "tags": ["reasoning", "coding", "32b", "quantized", "flagship"],
+        "prompt_template": {
+            "system_prefix": "<|im_start|>system\n",
+            "system_suffix": "<|im_end|>\n",
+            "user_prefix": "<|im_start|>user\n",
+            "user_suffix": "<|im_end|>\n",
+            "assistant_prefix": "<|im_start|>assistant\n",
+            "assistant_suffix": "<|im_end|>\n"
+        }
     }
 }
 
@@ -144,6 +186,13 @@ MODEL_ALIASES = {
     "planner": "qwen2.5-coder-14b",
     "deepseek": "deepseek-coder-v2",
     "executor": "deepseek-coder-v2",
+    "deepseek-r1": "deepseek-r1-distill-14b",
+    "r1": "deepseek-r1-distill-14b",
+    "reasoning": "deepseek-r1-distill-14b",
+    "r1-distill": "deepseek-r1-distill-14b",
+    "qwen3": "qwen3-32b",
+    "qwen3-32b": "qwen3-32b",
+    "flagship": "qwen3-32b",
 }
 
 

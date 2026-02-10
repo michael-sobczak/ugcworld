@@ -1,0 +1,52 @@
+$schema: "res://ai/workflows/schema/workflow.schema.json"
+id: "spell_authoring_v1"
+version: 2
+
+inputs:
+  user_prompt: { type: string, description: "The user's natural-language spell idea" }
+
+nodes:
+  # Step 1 — Generate a rich spell description from the user's idea
+  - id: describe
+    type: llm.chat
+    prompt: "{{inputs.user_prompt}}"
+    system_prompt_file: "res://client/prompts/generate_spell_description.md"
+    args: { max_tokens: 1024, temperature: 0.7 }
+    out: [text]
+
+  # Step 2 — Generate an asset manifest (JSON) from the description
+  - id: manifest
+    type: llm.chat
+    needs: [describe]
+    prompt: "{{nodes.describe.text}}"
+    system_prompt_file: "res://client/prompts/generate_spell_asset_manifest.md"
+    args: { max_tokens: 1024, temperature: 0.7 }
+    out: [text]
+
+  # Step 3 — Generate particle effect GDScript code.
+  #           The prompt now includes Godot 4 API reference and syntax rules,
+  #           eliminating the need for a separate sanitize pass.
+  - id: particle_gen
+    type: llm.chat
+    needs: [manifest]
+    prompt: "{{nodes.manifest.text}}"
+    system_prompt_file: "res://client/prompts/generate_particle_effect.md"
+    args: { max_tokens: 2048, temperature: 0.7 }
+    out: [text]
+
+  # Step 4 — Strip markdown fences from output (pure transform, no LLM)
+  - id: clean_code
+    type: transform.text
+    needs: [particle_gen]
+    args:
+      op: regex_replace
+      input: "{{nodes.particle_gen.text}}"
+      pattern: "^```(?:gdscript|gd)?\\n?|\\n?```$"
+      replacement: ""
+    out: [text]
+
+outputs:
+  description: "{{nodes.describe.text}}"
+  manifest: "{{nodes.manifest.text}}"
+  particle_code: "{{nodes.clean_code.text}}"
+  raw_particle: "{{nodes.particle_gen.text}}"

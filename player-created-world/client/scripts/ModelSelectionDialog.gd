@@ -11,8 +11,13 @@ signal dialog_closed
 @onready var load_btn: Button = $Panel/VBox/ButtonRow/LoadBtn
 @onready var cancel_btn: Button = $Panel/VBox/ButtonRow/CancelBtn
 @onready var status_label: Label = $Panel/VBox/StatusLabel
+@onready var loading_bar: HBoxContainer = $Panel/VBox/LoadingBar
+@onready var spinner: TextureProgressBar = $Panel/VBox/LoadingBar/Spinner
+@onready var loading_label: Label = $Panel/VBox/LoadingBar/LoadingLabel
 
 var _models: Array[Dictionary] = []
+var _is_loading: bool = false
+var _loading_elapsed: float = 0.0
 const _DEBUG_RUN_ID := "spell_model_load"
 var _debug_log_path: String = ""
 
@@ -93,6 +98,22 @@ func _on_item_activated(_index: int) -> void:
 	_on_load_pressed()
 
 
+func _process(delta: float) -> void:
+	if not _is_loading:
+		return
+
+	_loading_elapsed += delta
+
+	# Animate spinner rotation (smooth circular progress)
+	spinner.value = fmod(_loading_elapsed * 0.8, 1.0)
+
+	# Animate the dots on the loading label so it's clearly not frozen
+	var dot_count: int = (int(_loading_elapsed * 2.0) % 4)
+	var dots: String = ".".repeat(dot_count)
+	var elapsed_str: String = "%ds" % int(_loading_elapsed)
+	loading_label.text = "Loading model%s (%s)" % [dots, elapsed_str]
+
+
 func _on_load_pressed() -> void:
 	var selected := model_list.get_selected_items()
 	if selected.is_empty():
@@ -106,14 +127,11 @@ func _on_load_pressed() -> void:
 		_debug_log("H2", "load_pressed_invalid_selection", {"model_id": model_id})
 		return
 	
-	load_btn.disabled = true
-	refresh_btn.disabled = true
-	_set_status("Loading model: %s..." % model_id, Color.CYAN)
+	_start_loading(String(model_id))
 	_debug_log("H3", "load_model_start", {"model_id": model_id})
 	
 	var result: Dictionary = await LocalLLMService.load_model(model_id)
-	load_btn.disabled = false
-	refresh_btn.disabled = false
+	_stop_loading()
 	
 	if result.get("success", false):
 		_set_status("Loaded: %s" % model_id, Color.LIME)
@@ -128,6 +146,28 @@ func _on_load_pressed() -> void:
 
 func _on_cancel_pressed() -> void:
 	hide_dialog()
+
+
+func _start_loading(model_id: String) -> void:
+	_is_loading = true
+	_loading_elapsed = 0.0
+	load_btn.disabled = true
+	refresh_btn.disabled = true
+	cancel_btn.disabled = true
+	model_list.modulate = Color(0.5, 0.5, 0.5)
+	loading_bar.visible = true
+	loading_label.text = "Loading model..."
+	_set_status("Preparing %s — this may take a minute for large models" % model_id, Color(0.4, 0.8, 1.0))
+
+
+func _stop_loading() -> void:
+	_is_loading = false
+	_loading_elapsed = 0.0
+	load_btn.disabled = false
+	refresh_btn.disabled = false
+	cancel_btn.disabled = false
+	model_list.modulate = Color.WHITE
+	loading_bar.visible = false
 
 
 func _set_status(message: String, color: Color) -> void:

@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "res://ai/workflows/schema/workflow.schema.json",
+  "title": "PromptFlow Workflow",
+  "description": "Declarative workflow definition for chaining LLM calls and transforms.",
+  "type": "object",
+  "required": ["id", "version", "nodes", "outputs"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Path to this schema file."
+    },
+    "id": {
+      "type": "string",
+      "description": "Unique workflow identifier."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Workflow format version."
+    },
+    "inputs": {
+      "type": "object",
+      "description": "Declared inputs with type and optional default.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["string", "int", "float", "bool", "array", "dict"]
+          },
+          "default": {
+            "description": "Default value if input is not supplied."
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "description": "Ordered list of workflow nodes.",
+      "items": {
+        "type": "object",
+        "required": ["id", "type"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique node identifier."
+          },
+          "type": {
+            "type": "string",
+            "enum": ["llm.chat", "tool.http", "transform.text", "control.noop"],
+            "description": "Node type key from the node registry."
+          },
+          "needs": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Node IDs this node depends on."
+          },
+          "when": {
+            "type": "string",
+            "description": "Template expression; node is skipped if it resolves to false/empty."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Prompt template for llm.chat nodes."
+          },
+          "system_prompt": {
+            "type": "string",
+            "description": "System prompt template for llm.chat nodes."
+          },
+          "system_prompt_file": {
+            "type": "string",
+            "description": "Path to a file containing the system prompt (e.g. res://client/prompts/foo.md)."
+          },
+          "messages": {
+            "type": "array",
+            "description": "Chat messages array for llm.chat nodes.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "role": { "type": "string" },
+                "content": { "type": "string" }
+              }
+            }
+          },
+          "model": {
+            "type": "object",
+            "description": "Model selection for llm.chat nodes.",
+            "properties": {
+              "provider": { "type": "string" },
+              "name": { "type": "string" },
+              "params": { "type": "object" }
+            }
+          },
+          "args": {
+            "type": "object",
+            "description": "Additional arguments specific to the node type."
+          },
+          "out": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Declared output keys this node produces."
+          }
+        }
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "description": "Workflow outputs mapped from node outputs via templates.",
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  }
+}

@@ -58,6 +58,26 @@ text = "Load Selected"
 layout_mode = 2
 text = "Cancel"
 
+[node name="LoadingBar" type="HBoxContainer" parent="Panel/VBox"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="Spinner" type="TextureProgressBar" parent="Panel/VBox/LoadingBar"]
+layout_mode = 2
+custom_minimum_size = Vector2(28, 28)
+max_value = 1.0
+value = 0.3
+fill_mode = 4
+nine_patch_stretch = true
+
+[node name="LoadingLabel" type="Label" parent="Panel/VBox/LoadingBar"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.4, 0.8, 1, 1)
+theme_override_font_sizes/font_size = 13
+text = "Loading model..."
+
 [node name="StatusLabel" type="Label" parent="Panel/VBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)

@@ -15,7 +15,6 @@ const DESCRIPTION_PROMPT_PATH := "res://client/prompts/generate_spell_descriptio
 const ASSET_PROMPT_PATH := "res://client/prompts/generate_spell_asset_manifest.md"
 const PARTICLE_PROMPT_PATH := "res://client/prompts/generate_particle_effect.md"
 const SHAPE_PROMPT_PATH := "res://client/prompts/generate_simple_shapes.md"
-const SANITIZE_PROMPT_PATH := "res://client/prompts/sanitize_gdscript.md"
 
 @onready var close_button: Button = $Panel/VBox/Header/CloseButton
 @onready var input_field: TextEdit = $Panel/VBox/InputContainer/InputField
@@ -52,7 +51,6 @@ func _ready() -> void:
 		"assets": _load_prompt(ASSET_PROMPT_PATH),
 		"particle": _load_prompt(PARTICLE_PROMPT_PATH),
 		"shape": _load_prompt(SHAPE_PROMPT_PATH),
-		"sanitize": _load_prompt(SANITIZE_PROMPT_PATH),
 	}
 	_update_status("")
 	_configure_graph_editor()
@@ -272,6 +270,9 @@ func _set_node_status(node_id: int, status: String, result: String = "", error: 
 	spell_node.status = status
 	if not result.is_empty():
 		spell_node.result_text = result
+	# Clear stale error when transitioning to a non-error status
+	if status != "error":
+		spell_node.error_text = ""
 	if not error.is_empty():
 		spell_node.error_text = error
 
@@ -299,10 +300,16 @@ func _get_node_result(node_id: int) -> String:
 
 ## Reposition all graph nodes so the pipeline is centred in the view.
 ## Automatically adjusts zoom so the full graph fits with padding.
+##
+## This bypasses the graph editor's own set_zoom() and _center_scrollbars()
+## because those methods adjust scroll values based on mouse position and
+## use page/2 (= 40% of size) rather than size/2 (true centre).  For a
+## read-only pipeline display we need pixel-perfect centering.
 func _center_graph_nodes() -> void:
 	if _node_data.is_empty():
 		return
 
+	# 1. Compute bounding box of all nodes
 	var min_pos := Vector2(INF, INF)
 	var max_pos := Vector2(-INF, -INF)
 
@@ -318,31 +325,49 @@ func _center_graph_nodes() -> void:
 	var graph_center := (min_pos + max_pos) / 2.0
 	var graph_size := max_pos - min_pos
 
-	# Shift every node so the graph centroid sits at the world origin
+	# 2. Shift every node so the graph centroid sits at world origin (0, 0)
 	for node_id in _node_data:
 		var ui_node := graph_editor.get_graph_node(node_id)
 		if ui_node:
 			ui_node.position -= graph_center
 
-	# Refresh all links after repositioning
+	# 3. Refresh all links after repositioning
 	for node_id in _node_data:
 		var ui_node := graph_editor.get_graph_node(node_id)
 		if ui_node:
 			ui_node.moved.emit()
 
-	# Auto-zoom to fit the graph in the visible area
+	# 4. Compute zoom so the full graph fits inside the visible area
 	var view_size := graph_editor.size
-	if view_size.x > 0 and view_size.y > 0 and graph_size.x > 0 and graph_size.y > 0:
-		var padding := 60.0
+	if view_size.x <= 0 or view_size.y <= 0:
+		return  # Editor not laid out yet
+
+	var target_zoom := 1.0
+	if graph_size.x > 0 and graph_size.y > 0:
+		var padding := 40.0
 		var available := view_size - Vector2(padding, padding)
 		var zoom_x := available.x / graph_size.x
 		var zoom_y := available.y / graph_size.y
-		var target_zoom := minf(minf(zoom_x, zoom_y), 1.0)  # Don't zoom in past 1.0
+		target_zoom = minf(minf(zoom_x, zoom_y), 1.0)
 		target_zoom = clamp(target_zoom, graph_editor.min_zoom, graph_editor.max_zoom)
-		graph_editor.set_zoom(target_zoom)
 
-	# Centre the view on the origin (where the graph now sits)
-	graph_editor._center_scrollbars()
+	# 5. Apply zoom directly — we bypass set_zoom() because it adjusts
+	#    scrollbars relative to the current mouse position, which shifts
+	#    the view unpredictably when called programmatically.
+	graph_editor.zoom = target_zoom
+	graph_editor._grid.zoom = target_zoom
+	graph_editor._content.scale = Vector2(target_zoom, target_zoom)
+
+	# 6. Position the view so the world origin (graph centroid) is at the
+	#    exact centre of the editor.  The content's position in screen space
+	#    equals -scroll_value, so scroll = -size/2 ⟹ content_pos = size/2.
+	graph_editor._update_scrollbar_pages()
+	if graph_editor._h_scroll_bar:
+		graph_editor._h_scroll_bar.value = -view_size.x / 2.0
+	if graph_editor._v_scroll_bar:
+		graph_editor._v_scroll_bar.value = -view_size.y / 2.0
+
+	graph_editor.queue_redraw()
 
 
 # ============================================================================
@@ -352,7 +377,7 @@ func _center_graph_nodes() -> void:
 ## Called when a graph element is selected (clicked).
 ## After a short delay, if the node wasn't dragged, show a detail popup.
 func _on_graph_element_clicked(element) -> void:
-	if _is_generating or _active_popup != null:
+	if _active_popup != null:
 		return
 	if not element is CGEGraphNodeUI:
 		_pending_popup_node_id = -1
@@ -362,6 +387,11 @@ func _on_graph_element_clicked(element) -> void:
 	var spell_node := ui_node.graph_element as SpellGraphNode
 	if spell_node == null:
 		_pending_popup_node_id = -1
+		return
+
+	# Allow clicking nodes that have finished or errored even while pipeline runs.
+	# Nodes still pending/running have nothing to show yet.
+	if spell_node.status == "pending" or spell_node.status == "running":
 		return
 
 	var node_id := spell_node.id
@@ -407,13 +437,15 @@ func _show_popup_for_node(spell_node: SpellGraphNode) -> void:
 func _open_popup(title_text: String, popup_size: Vector2 = Vector2(550, 400)) -> VBoxContainer:
 	_close_active_popup()
 
-	# Semi-transparent overlay to block interaction with the graph
+	# Semi-transparent overlay to block interaction with the graph.
+	# z_index must be high to render above the graph editor's internal nodes.
 	var overlay := ColorRect.new()
 	overlay.name = "PopupOverlay"
 	overlay.color = Color(0, 0, 0, 0.4)
 	overlay.anchor_right = 1.0
 	overlay.anchor_bottom = 1.0
 	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	overlay.z_index = 100
 
 	# Centring wrapper
 	var center := CenterContainer.new()
@@ -558,10 +590,87 @@ func _show_human_review_popup(spell_node: SpellGraphNode) -> void:
 	)
 	btn_row.add_child(accept_btn)
 
+	var regen_btn := Button.new()
+	regen_btn.text = "Regenerate"
+	regen_btn.tooltip_text = "Re-run the LLM to generate fresh code for this asset"
+	regen_btn.pressed.connect(func():
+		_on_human_review_regenerate(node_id)
+	)
+	btn_row.add_child(regen_btn)
+
 	var copy_btn := Button.new()
 	copy_btn.text = "Copy Code"
 	copy_btn.pressed.connect(func(): DisplayServer.clipboard_set(code_edit.text))
 	btn_row.add_child(copy_btn)
+
+
+## Called when the user clicks "Regenerate" in the Human Review popup.
+## Re-runs the upstream LLM generation step and feeds the new code through
+## the full review → validate → compile chain.
+func _on_human_review_regenerate(review_node_id: int) -> void:
+	_close_active_popup()
+
+	var chain: Dictionary = _review_chain.get(review_node_id, {})
+	var gen_id: int = chain.get("gen", -1)
+	var validate_id: int = chain.get("validate", -1)
+	var compile_id: int = chain.get("compile", -1)
+	var prompt_key: String = chain.get("prompt_key", "")
+
+	if gen_id < 0 or prompt_key.is_empty():
+		_update_status("Cannot regenerate – missing upstream node info")
+		return
+
+	if not _ensure_llm_ready():
+		return
+
+	# Get the original description that was used as input to the gen node
+	var gen_node := _node_data.get(gen_id) as SpellGraphNode
+	if gen_node == null or gen_node.input_text.is_empty():
+		_update_status("Cannot regenerate – no input description found")
+		return
+
+	var description: String = gen_node.input_text
+
+	# Reset the entire chain to "running" / "pending" for visual feedback
+	_set_node_status(gen_id, "running")
+	_set_node_status(review_node_id, "pending")
+	if validate_id >= 0:
+		_set_node_status(validate_id, "pending")
+	if compile_id >= 0:
+		_set_node_status(compile_id, "pending")
+	_update_status("Regenerating %s..." % prompt_key)
+
+	# Re-run the LLM generation
+	var raw_code := await _llm_request(description, _prompts.get(prompt_key, ""))
+	if raw_code.is_empty():
+		_set_node_status(gen_id, "error", "", "Regeneration failed")
+		_update_status("Regeneration failed")
+		return
+
+	var code := _extract_gdscript(raw_code)
+	_set_node_status(gen_id, "done", code)
+
+	# Feed through review (auto-accept the new code)
+	_set_node_input(review_node_id, code)
+	_set_node_status(review_node_id, "done", code)
+
+	# Validate
+	if validate_id >= 0:
+		_set_node_input(validate_id, code)
+		_set_node_status(validate_id, "running")
+		_update_status("Validating regenerated code...")
+		var vresult := _validate_code(code)
+		if vresult["valid"]:
+			_set_node_status(validate_id, "done", code)
+			if compile_id >= 0:
+				_set_node_input(compile_id, code)
+				_set_node_status(compile_id, "done", code)
+			_update_status("Regeneration complete – click Review node to inspect")
+		else:
+			_set_node_status(validate_id, "error", "", vresult["error"])
+			if compile_id >= 0:
+				_set_node_status(compile_id, "error", "", "Upstream validation failed")
+			_update_status("Regenerated code failed validation – edit in Human Review to fix")
 
 
 ## Called when the user confirms edits in the Human Review popup.
@@ -577,25 +686,33 @@ func _on_human_review_confirmed(node_id: int, new_code: String) -> void:
 	if ui_node and ui_node.has_method("refresh"):
 		ui_node.refresh()
 
+	_close_active_popup()
+
 	# Re-run validation → compile chain
 	var chain: Dictionary = _review_chain.get(node_id, {})
 	var validate_id: int = chain.get("validate", -1)
 	var compile_id: int = chain.get("compile", -1)
 
 	if validate_id >= 0:
+		# Show visual feedback while re-validating
 		_set_node_input(validate_id, new_code)
+		_set_node_status(validate_id, "running")
+		if compile_id >= 0:
+			_set_node_status(compile_id, "pending")
+		_update_status("Re-validating edited code...")
+
 		var result := _validate_code(new_code)
 		if result["valid"]:
 			_set_node_status(validate_id, "done", new_code)
 			if compile_id >= 0:
 				_set_node_input(compile_id, new_code)
 				_set_node_status(compile_id, "done", new_code)
+			_update_status("Re-validation passed – click any node to inspect")
 		else:
 			_set_node_status(validate_id, "error", "", result["error"])
 			if compile_id >= 0:
 				_set_node_status(compile_id, "error", "", "Upstream validation failed")
-
-	_close_active_popup()
+			_update_status("Re-validation failed – edit in Human Review to fix")
 
 
 # ============================================================================
@@ -859,9 +976,9 @@ static func _code_has_external_refs(code: String) -> bool:
 # ============================================================================
 
 func _run_spell_pipeline(user_prompt: String) -> void:
-	## Layout constants – compact spacing for 8 columns.
-	## Columns: Input(0) Desc(1) Manifest(2) Gen(3) Sanitize(4) Review(5) Validate(6) Compile(7)
-	const COL_W := 155.0
+	## Layout constants – compact spacing for 7 columns.
+	## Columns: Input(0) Desc(1) Manifest(2) Gen(3) Review(4) Validate(5) Compile(6)
+	const COL_W := 160.0
 	const ROW_H := 65.0
 
 	# =====================================================================
@@ -965,37 +1082,30 @@ func _run_spell_pipeline(user_prompt: String) -> void:
 		)
 		_add_graph_edge(manifest_id, gen_id)
 
-		var san_id := _add_graph_node(
-			SpellGraphNode.StepType.SANITIZE,
-			"Sanitize P%d" % (i + 1), "sanitize",
-			Vector2(COL_W * 4, y)
-		)
-		_add_graph_edge(gen_id, san_id)
-
 		var review_id := _add_graph_node(
 			SpellGraphNode.StepType.HUMAN_REVIEW,
 			"Review P%d" % (i + 1), "",
-			Vector2(COL_W * 5, y)
+			Vector2(COL_W * 4, y)
 		)
-		_add_graph_edge(san_id, review_id)
+		_add_graph_edge(gen_id, review_id)
 
 		var validate_id := _add_graph_node(
 			SpellGraphNode.StepType.VALIDATE,
 			"Validate P%d" % (i + 1), "",
-			Vector2(COL_W * 6, y)
+			Vector2(COL_W * 5, y)
 		)
 		_add_graph_edge(review_id, validate_id)
 
 		var compile_id := _add_graph_node(
 			SpellGraphNode.StepType.COMPILE_SAVE,
 			"Compile P%d" % (i + 1), "",
-			Vector2(COL_W * 7, y)
+			Vector2(COL_W * 6, y)
 		)
 		_add_graph_edge(validate_id, compile_id)
-		_review_chain[review_id] = {"validate": validate_id, "compile": compile_id}
+		_review_chain[review_id] = {"gen": gen_id, "validate": validate_id, "compile": compile_id, "prompt_key": "particle"}
 
 		particle_rows.append({
-			"gen": gen_id, "san": san_id,
+			"gen": gen_id,
 			"review": review_id, "validate": validate_id, "compile": compile_id,
 			"description": particle_entries[i]["description"],
 		})
@@ -1017,37 +1127,30 @@ func _run_spell_pipeline(user_prompt: String) -> void:
 		)
 		_add_graph_edge(manifest_id, shape_gen_id)
 
-		var shape_san_id := _add_graph_node(
-			SpellGraphNode.StepType.SANITIZE,
-			"Sanitize S", "sanitize",
-			Vector2(COL_W * 4, y)
-		)
-		_add_graph_edge(shape_gen_id, shape_san_id)
-
 		var shape_review_id := _add_graph_node(
 			SpellGraphNode.StepType.HUMAN_REVIEW,
 			"Review S", "",
-			Vector2(COL_W * 5, y)
+			Vector2(COL_W * 4, y)
 		)
-		_add_graph_edge(shape_san_id, shape_review_id)
+		_add_graph_edge(shape_gen_id, shape_review_id)
 
 		var shape_validate_id := _add_graph_node(
 			SpellGraphNode.StepType.VALIDATE,
 			"Validate S", "",
-			Vector2(COL_W * 6, y)
+			Vector2(COL_W * 5, y)
 		)
 		_add_graph_edge(shape_review_id, shape_validate_id)
 
 		var shape_compile_id := _add_graph_node(
 			SpellGraphNode.StepType.COMPILE_SAVE,
 			"Compile S", "",
-			Vector2(COL_W * 7, y)
+			Vector2(COL_W * 6, y)
 		)
 		_add_graph_edge(shape_validate_id, shape_compile_id)
-		_review_chain[shape_review_id] = {"validate": shape_validate_id, "compile": shape_compile_id}
+		_review_chain[shape_review_id] = {"gen": shape_gen_id, "validate": shape_validate_id, "compile": shape_compile_id, "prompt_key": "shape"}
 
 		shape_ids = {
-			"gen": shape_gen_id, "san": shape_san_id,
+			"gen": shape_gen_id,
 			"review": shape_review_id, "validate": shape_validate_id,
 			"compile": shape_compile_id, "combined": combined,
 		}
@@ -1063,13 +1166,12 @@ func _run_spell_pipeline(user_prompt: String) -> void:
 
 	for pr in particle_rows:
 		var gen_id: int = pr["gen"]
-		var san_id: int = pr["san"]
 		var review_id: int = pr["review"]
 		var validate_id: int = pr["validate"]
 		var compile_id: int = pr["compile"]
 		var p_desc: String = pr["description"]
 
-		# --- Particle Generation ---
+		# --- Particle Generation (combined prompt handles Godot 4 correctness) ---
 		_set_node_input(gen_id, p_desc)
 		_set_node_status(gen_id, "running")
 		_update_status("Generating particle...")
@@ -1077,29 +1179,22 @@ func _run_spell_pipeline(user_prompt: String) -> void:
 		if raw_code.is_empty():
 			_set_node_status(gen_id, "error", "", "Generation failed")
 			continue
-		raw_code = _extract_gdscript(raw_code)
-		_set_node_status(gen_id, "done", raw_code)
-
-		# --- Sanitize ---
-		_set_node_input(san_id, raw_code)
-		_set_node_status(san_id, "running")
-		_update_status("Sanitizing particle...")
-		var sanitized := await _sanitize_code(raw_code)
-		_set_node_status(san_id, "done", sanitized)
+		var code := _extract_gdscript(raw_code)
+		_set_node_status(gen_id, "done", code)
 
 		# --- Auto-complete Human Review ---
-		_set_node_input(review_id, sanitized)
-		_set_node_status(review_id, "done", sanitized)
+		_set_node_input(review_id, code)
+		_set_node_status(review_id, "done", code)
 
 		# --- Validate (compile-check) ---
-		_set_node_input(validate_id, sanitized)
+		_set_node_input(validate_id, code)
 		_set_node_status(validate_id, "running")
 		_update_status("Validating particle...")
-		var vresult := _validate_code(sanitized)
+		var vresult := _validate_code(code)
 		if vresult["valid"]:
-			_set_node_status(validate_id, "done", sanitized)
-			_set_node_input(compile_id, sanitized)
-			_set_node_status(compile_id, "done", sanitized)
+			_set_node_status(validate_id, "done", code)
+			_set_node_input(compile_id, code)
+			_set_node_status(compile_id, "done", code)
 		else:
 			_set_node_status(validate_id, "error", "", vresult["error"])
 			_set_node_status(compile_id, "error", "", "Upstream validation failed")
@@ -1107,7 +1202,6 @@ func _run_spell_pipeline(user_prompt: String) -> void:
 	# --- Shape generation ---
 	if not shape_ids.is_empty():
 		var sg: int = shape_ids["gen"]
-		var ss: int = shape_ids["san"]
 		var sr: int = shape_ids["review"]
 		var sv: int = shape_ids["validate"]
 		var sc: int = shape_ids["compile"]
@@ -1120,26 +1214,20 @@ func _run_spell_pipeline(user_prompt: String) -> void:
 		if raw_shape.is_empty():
 			_set_node_status(sg, "error", "", "Generation failed")
 		else:
-			raw_shape = _extract_gdscript(raw_shape)
-			_set_node_status(sg, "done", raw_shape)
+			var shape_code := _extract_gdscript(raw_shape)
+			_set_node_status(sg, "done", shape_code)
 
-			_set_node_input(ss, raw_shape)
-			_set_node_status(ss, "running")
-			_update_status("Sanitizing shapes...")
-			var sanitized_shape := await _sanitize_code(raw_shape)
-			_set_node_status(ss, "done", sanitized_shape)
-
-			_set_node_input(sr, sanitized_shape)
-			_set_node_status(sr, "done", sanitized_shape)
+			_set_node_input(sr, shape_code)
+			_set_node_status(sr, "done", shape_code)
 
 			# --- Validate shapes ---
-			_set_node_input(sv, sanitized_shape)
+			_set_node_input(sv, shape_code)
 			_set_node_status(sv, "running")
-			var sv_result := _validate_code(sanitized_shape)
+			var sv_result := _validate_code(shape_code)
 			if sv_result["valid"]:
-				_set_node_status(sv, "done", sanitized_shape)
-				_set_node_input(sc, sanitized_shape)
-				_set_node_status(sc, "done", sanitized_shape)
+				_set_node_status(sv, "done", shape_code)
+				_set_node_input(sc, shape_code)
+				_set_node_status(sc, "done", shape_code)
 			else:
 				_set_node_status(sv, "error", "", sv_result["error"])
 				_set_node_status(sc, "error", "", "Upstream validation failed")
@@ -1148,20 +1236,45 @@ func _run_spell_pipeline(user_prompt: String) -> void:
 
 
 # ============================================================================
-# Code Utilities
+# Workflow Engine Integration (alternative execution path)
 # ============================================================================
 
-func _sanitize_code(code: String) -> String:
-	var sanitize_prompt: String = _prompts.get("sanitize", "")
-	if sanitize_prompt.is_empty() or not LocalLLMService.is_model_loaded():
-		return code
-	var sanitized := await _llm_generate(code, sanitize_prompt, {
-		"max_tokens": 1536, "temperature": 0.1
+## The workflow YAML path for the spell authoring pipeline.
+const WORKFLOW_PATH := "res://ai/workflows/spell_authoring_v1.flow.yaml"
+
+## Run the first three steps (describe → manifest → particle gen → sanitize)
+## through the declarative workflow engine instead of imperative LLM calls.
+## Returns the workflow outputs dictionary, or null on failure.
+##
+## This is an alternative to the direct _llm_request calls above.  It
+## demonstrates how an imperative chain can be replaced by a single
+## `run_workflow` call.  The per-particle/shape loops still run imperatively
+## because YAML workflows are static (can't express dynamic iteration).
+func _run_workflow_pipeline(user_prompt: String) -> Variant:
+	var executor := WorkflowExecutor.new()
+
+	# Wire tracing signals to our graph UI nodes
+	executor.node_started.connect(func(nid: String, _def: Dictionary):
+		_update_status("Workflow: running %s..." % nid)
+	)
+	executor.node_failed.connect(func(nid: String, err: String):
+		push_warning("[Workflow] Node '%s' failed: %s" % [nid, err])
+	)
+
+	var result := await executor.run_workflow(WORKFLOW_PATH, {
+		"user_prompt": user_prompt,
 	})
-	sanitized = _extract_gdscript(sanitized)
-	if sanitized.strip_edges().is_empty():
-		return code
-	return sanitized
+
+	if result.has("_error"):
+		push_warning("[Workflow] %s" % str(result["_error"]))
+		return null
+
+	return result
+
+
+# ============================================================================
+# Code Utilities
+# ============================================================================
 
 
 func _extract_gdscript(text: String) -> String:

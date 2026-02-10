@@ -49,4 +49,6 @@ Output
 
 One complete GDScript file that renders the object procedurally at runtime
 
+Never use := when the RHS returns Variant or is untyped — use explicit types (var x: Node = ..., var x: Variant = ...).
+
 DO NOT INCLUDE ```gdscript or anything besides the actual code that compiles to GDScript
